@@ -26,6 +26,7 @@
   "dependencies": {
     "grammy": "^1.33.0",
     "@anthropic-ai/sdk": "^0.39.0",
+    "@aibtc/mcp-server": "^1.28.1",
     "@modelcontextprotocol/sdk": "^1.10.0",
     "@stacks/transactions": "^7.0.0",
     "@stacks/network": "^6.0.0",

@@ -202,6 +202,15 @@ export class Database {
   close(): void {
     this.db.close();
   }
+let _db: Database | null = null;
+
+export function getDatabase(dbPath?: string): Database {
+  if (!_db) {
+    _db = new Database(dbPath);
+  }
+  return _db;
 }
+
+export { Database };
 
 export const db = new Database();

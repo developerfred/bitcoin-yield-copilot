@@ -1,4 +1,4 @@
-import { Database } from './database.js';
+import { Database } from '../../agent/database.js';
 import { createLogger } from 'pino';
 
 const logger = createLogger({ name: 'bot:middleware:auth' });

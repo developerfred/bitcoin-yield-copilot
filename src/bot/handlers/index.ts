@@ -1,14 +1,73 @@
-import { Bot, Context, Keyboard } from 'grammy';
-import { Database } from '../../agent/database.js';
-import { AuthMiddleware, UserSession } from '../middleware/auth.js';
+import { Bot, Context, Keyboard, InlineKeyboard } from 'grammy';
+import { getDatabase } from '../../agent/database.js';
+import { AuthMiddleware } from '../middleware/auth.js';
 import { mcpClient } from '../../mcp/client.js';
+import { ClaudeAgent, Tool } from '../../agent/claude.js';
 import { createLogger } from 'pino';
 
 const logger = createLogger({ name: 'bot:handlers' });
 
+// Define tools available to Claude
+const agentTools: Tool[] = [
+  {
+    name: 'get_yields',
+    description: 'Get current yield opportunities from DeFi protocols',
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'get_portfolio',
+    description: 'Get user portfolio positions',
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'deposit',
+    description: 'Deposit funds into a yield protocol',
+    input_schema: {
+      type: 'object',
+      properties: {
+        protocol: { type: 'string', description: 'Protocol name (zest, alex, hermetica, bitflow)' },
+        token: { type: 'string', description: 'Token to deposit (sBTC, STX)' },
+        amount: { type: 'string', description: 'Amount to deposit' },
+      },
+      required: ['protocol', 'token', 'amount'],
+    },
+  },
+  {
+    name: 'withdraw',
+    description: 'Withdraw funds from a yield protocol',
+    input_schema: {
+      type: 'object',
+      properties: {
+        protocol: { type: 'string', description: 'Protocol name' },
+        token: { type: 'string', description: 'Token to withdraw' },
+        amount: { type: 'string', description: 'Amount to withdraw' },
+      },
+      required: ['protocol', 'token', 'amount'],
+    },
+  },
+  {
+    name: 'get_balance',
+    description: 'Get wallet balance',
+    input_schema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Stacks wallet address' },
+      },
+      required: ['address'],
+    },
+  },
+];
+
 export function setupHandlers(bot: Bot<Context>) {
-  const db = new Database();
+  const db = getDatabase();
   const auth = new AuthMiddleware(db);
+  const claudeAgent = new ClaudeAgent();
 
   // Keyboard helpers
   const riskKeyboard = new Keyboard()
@@ -326,41 +385,161 @@ Examples:
       return;
     }
 
-    // Process AI message
+    // Process AI message with Claude
     await ctx.reply('🤔 Thinking...');
 
     try {
-      const apys = await mcpClient.getProtocolAPYs();
+      // Build context for Claude
+      const user = await db.getUser(telegramId);
+      const positions = user ? await db.getUserPositions(user.id) : [];
       
-      // Simple response based on keywords
-      const lowerText = text.toLowerCase();
-      
-      if (lowerText.includes('yield') || lowerText.includes('ap') || lowerText.includes('render')) {
-        if (apys.length > 0) {
-          let message = '📈 Yield Opportunities:\n\n';
-          for (const { protocol, apy, token } of apys) {
-            message += `• ${protocol}: ${apy.toFixed(2)}% APY\n`;
+      const contextMessage = `User context:
+- Risk profile: ${session.riskProfile || 'not set'}
+- Allowed tokens: ${session.allowedTokens?.join(', ') || 'not set'}
+- Wallet: ${session.stacksAddress}
+- Current positions: ${positions.length > 0 ? (positions as any[]).map((p) => `${p.protocol}: ${p.amount} ${p.token}`).join(', ') : 'none'}
+
+User message: ${text}`;
+
+      // Get AI response
+      const { response, toolCalls } = await claudeAgent.sendMessage(
+        [{ role: 'user', content: contextMessage }],
+        agentTools
+      );
+
+      // If Claude wants to use tools, execute them
+      if (toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          logger.info({ tool: toolCall.name, args: toolCall.input }, 'Executing tool');
+          
+          let toolResult = '';
+          
+          switch (toolCall.name) {
+            case 'get_yields': {
+              const apys = await mcpClient.getProtocolAPYs();
+              toolResult = JSON.stringify(apys);
+              break;
+            }
+            case 'get_portfolio':
+              toolResult = JSON.stringify(positions);
+              break;
+            case 'get_balance': {
+              const balance = await mcpClient.getStacksBalance(toolCall.input.address as string);
+              toolResult = JSON.stringify(balance);
+              break;
+            }
+            case 'deposit': {
+              const depositInlineKeyboard = new InlineKeyboard()
+                .text('✅ Confirm', `confirm_deposit_${toolCall.input.protocol}_${toolCall.input.amount}`)
+                .text('❌ Cancel', 'cancel_action');
+              
+              await ctx.reply(
+                `📝 Confirm Deposit\n\nProtocol: ${toolCall.input.protocol}\nToken: ${toolCall.input.token}\nAmount: ${toolCall.input.amount}\n\nIs this correct?`,
+                { reply_markup: depositInlineKeyboard }
+              );
+              return;
+            }
+            case 'withdraw': {
+              const withdrawInlineKeyboard = new InlineKeyboard()
+                .text('✅ Confirm', `confirm_withdraw_${toolCall.input.protocol}_${toolCall.input.amount}`)
+                .text('❌ Cancel', 'cancel_action');
+              
+              await ctx.reply(
+                `📝 Confirm Withdrawal\n\nProtocol: ${toolCall.input.protocol}\nToken: ${toolCall.input.token}\nAmount: ${toolCall.input.amount}\n\nIs this correct?`,
+                { reply_markup: withdrawInlineKeyboard }
+              );
+              return;
+            }
+            default:
+              toolResult = `Unknown tool: ${toolCall.name}`;
           }
-          message += '\nWhich protocol would you like to use?';
-          await ctx.reply(message);
-        } else {
-          await ctx.reply('Could not fetch yields. Please try /yields');
+          
+          // Continue conversation with tool result
+          const continueResponse = await claudeAgent.sendMessage(
+            [
+              { role: 'user', content: contextMessage },
+              { role: 'assistant' as any, content: response },
+              { role: 'tool' as any, content: toolResult },
+            ],
+            agentTools
+          );
+          
+          await ctx.reply(continueResponse.response);
+          return;
         }
-      } else if (lowerText.includes('portfolio') || lowerText.includes('posição')) {
-        await ctx.reply('Use /portfolio to view your positions.');
-      } else {
-        await ctx.reply(
-          `I understand you want to: "${text}"\n\n` +
-          'I can help you with:\n' +
-          '• Finding yield opportunities (/yields)\n' +
-          '• Viewing your portfolio (/portfolio)\n' +
-          '• Depositing Bitcoin\n\nTry: "Show me yields"'
-        );
       }
+
+      // Just send the response
+      await ctx.reply(response);
+      
     } catch (error) {
       logger.error({ error }, 'AI message processing failed');
       await ctx.reply('Sorry, something went wrong. Please try again.');
     }
+  });
+
+  // Handle confirmation callbacks
+  bot.callbackQuery(/confirm_deposit_(.+)_(\d+\.?\d*)/, async (ctx) => {
+    const [protocol, amount] = ctx.match;
+    const telegramId = String(ctx.from?.id);
+    
+    await ctx.answerCallbackQuery('Processing deposit...');
+    
+    const session = await auth.getSession(telegramId);
+    if (!session?.stacksAddress) {
+      await ctx.editMessageText('❌ Wallet not connected');
+      return;
+    }
+
+    try {
+      await ctx.editMessageText(`⏳ Depositing ${amount} sBTC to ${protocol}...`);
+      
+      const result = await mcpClient.executeDeposit(protocol, 'sBTC', amount, session.stacksAddress);
+      
+      // Store position in database
+      const user = await db.getUser(telegramId);
+      if (user) {
+        await db.createPosition(user.id, protocol, 'sBTC', parseFloat(amount), 0, result.txId);
+      }
+      
+      await ctx.editMessageText(
+        `✅ Deposit successful!\n\nAmount: ${amount} sBTC\nProtocol: ${protocol}\nTx: \`${result.txId}\``,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error: any) {
+      await ctx.editMessageText(`❌ Deposit failed: ${error.message}`);
+    }
+  });
+
+  bot.callbackQuery(/confirm_withdraw_(.+)_(\d+\.?\d*)/, async (ctx) => {
+    const [protocol, amount] = ctx.match;
+    const telegramId = String(ctx.from?.id);
+    
+    await ctx.answerCallbackQuery('Processing withdrawal...');
+    
+    const session = await auth.getSession(telegramId);
+    if (!session?.stacksAddress) {
+      await ctx.editMessageText('❌ Wallet not connected');
+      return;
+    }
+
+    try {
+      await ctx.editMessageText(`⏳ Withdrawing ${amount} sBTC from ${protocol}...`);
+      
+      const result = await mcpClient.executeWithdraw(protocol, 'sBTC', amount, session.stacksAddress);
+      
+      await ctx.editMessageText(
+        `✅ Withdrawal successful!\n\nAmount: ${amount} sBTC\nProtocol: ${protocol}\nTx: \`${result.txId}\``,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error: any) {
+      await ctx.editMessageText(`❌ Withdrawal failed: ${error.message}`);
+    }
+  });
+
+  bot.callbackQuery('cancel_action', async (ctx) => {
+    await ctx.answerCallbackQuery('Action cancelled');
+    await ctx.editMessageText('❌ Action cancelled');
   });
 
   logger.info('Bot handlers configured');
