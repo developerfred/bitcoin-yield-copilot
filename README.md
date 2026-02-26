@@ -116,7 +116,7 @@ Agent: [executes deposit, confirms onchain, sends receipt]
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/bitcoin-yield-copilot.git
+git clone https://github.com/codingsh/bitcoin-yield-copilot.git
 cd bitcoin-yield-copilot
 
 # Install dependencies
