@@ -1,0 +1,53 @@
+{
+  "name": "bitcoin-yield-copilot",
+  "version": "0.0.0",
+  "description": "Autonomous Telegram agent that manages Bitcoin yield in the Stacks ecosystem",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "lint": "eslint src --ext .ts",
+    "prepare": "husky install"
+  },
+  "keywords": [
+    "bitcoin",
+    "stacks",
+    "yield",
+    "telegram",
+    "bot",
+    "defi",
+    "ai-agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "grammy": "^1.33.0",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@stacks/transactions": "^7.0.0",
+    "@stacks/network": "^6.0.0",
+    "better-sqlite3": "^11.8.1",
+    "zod": "^3.24.1",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "tsx": "^4.19.2",
+    "vitest": "^3.0.4",
+    "eslint": "^9.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.21.0",
+    "@typescript-eslint/parser": "^8.21.0",
+    "husky": "^9.1.7",
+    "commitlint": "^19.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
