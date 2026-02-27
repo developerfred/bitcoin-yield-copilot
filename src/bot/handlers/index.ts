@@ -224,7 +224,25 @@ export function setupHandlers(bot: Bot<Context>) {
     );
   });
 
-  // Handle wallet address input
+  // /connectwallet command - Connect wallet separately
+  bot.command('connect', async (ctx) => {
+    const telegramId = String(ctx.from?.id);
+    const session = await auth.getSession(telegramId);
+
+    if (!session) {
+      await ctx.reply('Please start with /start first');
+      return;
+    }
+
+    await sendWalletConnectionPrompt(ctx, session);
+  });
+
+  // Handle wallet connection callback
+  bot.callbackQuery('connect_wallet', async (ctx) => {
+    await handleWalletConnection(ctx, auth);
+  });
+
+  // Handle wallet address input - backward compatibility
   bot.hear(/^(SP|SM|SZ)[A-HJ-NP-Za-km-z1-9]{38,50}$/, async (ctx) => {
     const telegramId = String(ctx.from?.id);
     const session = await auth.getSession(telegramId);
@@ -234,7 +252,6 @@ export function setupHandlers(bot: Bot<Context>) {
     }
 
     const address = ctx.match[0];
-
     await auth.completeOnboarding(telegramId, address);
 
     await ctx.reply(
@@ -544,3 +561,14 @@ User message: ${text}`;
 
   logger.info('Bot handlers configured');
 }
+
+
+export { 
+  createWalletConnectKeyboard, 
+  createWalletCallbackKeyboard,
+  sendWalletConnectionPrompt,
+  handleWalletConnection,
+  handleWalletAuthCallback,
+  isWalletConnected,
+  getUserWalletAddress 
+} from './wallet.js';
