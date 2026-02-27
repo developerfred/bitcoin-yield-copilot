@@ -1,0 +1,5 @@
+output/*.md
+output/pages/*.html
+output/*.html
+!output/.gitkeep
+!output/pages/.gitkeep
