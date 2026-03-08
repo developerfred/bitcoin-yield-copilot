@@ -39,5 +39,15 @@ coverage/
 *.tgz
 .cache/
 
+# Deployments
+
 .env
 settings
+deployments/
+
+# docs/audit 
+
+TESTING_REPORT.md
+ALEX_TESTNET_SETUP.md
+history.txt 
+docst/wallet-test.md
