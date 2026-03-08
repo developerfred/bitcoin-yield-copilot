@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: ./docker/mcp-server
+      dockerfile: Dockerfile
+    container_name: aibtc-mcp-server
+    environment:
+      - NETWORK=${STACKS_NETWORK:-testnet}
+      - CLIENT_MNEMONIC=${CLIENT_MNEMONIC:-}
+      - HIRO_API_KEY=${HIRO_API_KEY:-}
+      - API_URL=https://x402.biwas.xyz
+    volumes:
+      - aibtc-data:/home/nodejs/.aibtc
+    restart: unless-stopped
+    networks:
+      - bitcoin-yield
+
+volumes:
+  aibtc-data:
+    driver: local
+
+networks:
+  bitcoin-yield:
+    driver: bridge
