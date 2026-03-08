@@ -2,6 +2,17 @@
 
 This document describes the protocols module (`src/protocols/`) which integrates with various DeFi protocols.
 
+## Supported Protocols
+
+The project integrates with multiple DeFi protocols on Stacks:
+
+| Protocol | Type | Description |
+|----------|------|-------------|
+| ALEX | DEX | Decentralized exchange with liquidity pools |
+| Zest | Yield | Bitcoin yield vaults |
+| Hermetica | Yield | Yield vault with Bitcoin exposure |
+| Bitflow | DEX | DEX with liquidity provision |
+
 ## ALEX Protocol (`alex.ts`)
 
 The ALEX protocol integration provides access to the ALEX decentralized exchange on Stacks.
@@ -162,3 +173,24 @@ Converts human-readable amount to raw on-chain format.
 | sBTC | 8 | Wrapped Bitcoin |
 | ALEX | 8 | ALEX token |
 | USDA | 6 | Stablecoin |
+
+## Protocol Integration via MCP
+
+The protocol integrations are primarily accessed through the aibtc-mcp-server which provides:
+
+### Zest Protocol
+- Deposit to Zest vaults
+- Withdraw from Zest vaults
+- Get vault APY
+- Get user vault balance
+
+### Hermetica Protocol
+- Deposit to Hermetica vaults
+- Withdraw from vaults
+- Get yield rates
+
+### Bitflow Protocol
+- Create liquidity positions
+- Add/remove liquidity
+- Swap tokens
+- Get pool info

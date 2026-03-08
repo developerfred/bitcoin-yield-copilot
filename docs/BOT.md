@@ -22,6 +22,9 @@ The main handler file sets up all bot commands and message processing.
 | `/yields` | Discover current yield opportunities |
 | `/portfolio` | View your positions |
 | `/alex` | Access ALEX DEX |
+| `/deposit` | Deposit funds into yield protocol |
+| `/withdraw` | Withdraw funds from yield protocol |
+| `/addwithdraw` | Initialize and activate withdrawal protocol |
 | `/alerts` | Manage APY alerts |
 | `/help` | Show help message |
 
@@ -39,9 +42,12 @@ Text messages not matching commands are processed by Claude AI:
 
 | Pattern | Description |
 |---------|-------------|
+| `withdraw:activate` | Handle withdrawal protocol activation |
+| `withdraw:cancel` | Cancel pending action |
 | `confirm_deposit_{protocol}_{amount}` | Handle deposit confirmation |
 | `confirm_withdraw_{protocol}_{amount}` | Handle withdraw confirmation |
-| `cancel_action` | Cancel pending action |
+| `alex:swap` | Handle ALEX swap confirmation |
+| `alex:pool_{poolId}` | Handle pool selection |
 
 ## Middleware
 
@@ -83,6 +89,87 @@ Manages user sessions.
 
 Network configuration (mainnet/testnet).
 
+## Additional Handler Files
+
+### Onboarding (`handlers/onboarding.ts`)
+
+Complete onboarding flow management:
+- Risk profile selection (conservative/moderate/aggressive)
+- Token selection (sBTC only, sBTC + STX, all tokens)
+- Contract wallet deployment
+- Withdrawal address management
+- Balance queries via Hiro API
+
+### Deposit (`handlers/deposit.ts`)
+
+Handles deposit operations:
+- Deposit command processing
+- Balance checking
+- Transaction building and execution
+
+### Withdraw (`handlers/withdraw.ts`)
+
+Handles withdrawal operations:
+- Withdrawal command processing
+- Address validation
+- Two-step withdrawal (authorize + withdraw)
+
+### Protocols (`handlers/protocols.ts`)
+
+Protocol management:
+- Add/remove withdrawal protocols
+- Protocol status monitoring
+- Activation flows
+
+### ALEX (`handlers/alex.ts`)
+
+ALEX DEX integration:
+- Pool listing and selection
+- Token swaps
+- Liquidity positions
+
+### Wallet (`handlers/wallet.ts`)
+
+Wallet-related commands:
+- Connect wallet via WebApp
+- Disconnect wallet
+- View wallet info
+
+1. User sends `/start`
+2. Bot requests wallet connection
+3. User connects via WebApp
+4. Bot stores wallet address
+5. Onboarding complete
+
+### Wallet Management
+
+### WalletManager (`wallet/WalletManager.ts`)
+
+Manages user wallet connections and operations.
+
+**Key Methods:**
+
+- `connect(telegramId, walletData)`: Connect wallet
+- `disconnect(telegramId)`: Disconnect wallet
+- `getAddress(telegramId)`: Get wallet address
+- `executeOperation(telegramId, protocol, action, amount)`: Execute operation
+- `getRemainingLimits(telegramId)`: Get transaction limits
+- `createContractWallet(telegramId)`: Deploy new contract wallet
+- `initializeContractForUser(telegramId)`: Initialize user contract
+- `withdrawStx(telegramId, amount, recipient)`: Execute withdrawal
+
+### Connection (`wallet/connection.ts`)
+
+Handles wallet connection flows.
+
+### Session (`wallet/session.ts`)
+
+Manages user sessions.
+
+### Network (`wallet/network.ts`)
+
+Network configuration (mainnet/testnet).
+
 ## Onboarding Flow
 
 1. User sends `/start`
@@ -90,6 +177,8 @@ Network configuration (mainnet/testnet).
 3. User connects via WebApp
 4. Bot stores wallet address
 5. Onboarding complete
+
+## Onboarding Flow
 
 ## Message Examples
 

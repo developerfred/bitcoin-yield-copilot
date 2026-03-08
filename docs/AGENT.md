@@ -69,10 +69,13 @@ class Database {
 | id | INTEGER | Primary key |
 | telegram_id | TEXT | Unique Telegram user ID |
 | stacks_address | TEXT | User's Stacks address |
-| risk_profile | TEXT | User's risk preference |
+| contract_address | TEXT | User's contract wallet address |
+| risk_profile | TEXT | User's risk preference (conservative/moderate/aggressive) |
 | allowed_tokens | TEXT | JSON array of allowed tokens |
-| is_onboarded | INTEGER | Onboarding status |
+| is_onboarded | INTEGER | Onboarding status (0/1) |
 | onboarding_step | TEXT | Current onboarding step |
+| deploy_attempts | INTEGER | Number of deployment attempts |
+| last_error | TEXT | Last deployment error |
 | created_at | DATETIME | Creation timestamp |
 | updated_at | DATETIME | Last update timestamp |
 
@@ -125,7 +128,11 @@ class Database {
 - `updateRiskProfile(telegramId, profile)`: Update risk profile
 - `updateAllowedTokens(telegramId, tokens)`: Update allowed tokens
 - `updateStacksAddress(telegramId, address)`: Update Stacks address
+- `updateContractAddress(telegramId, address)`: Update contract wallet address
 - `completeOnboarding(telegramId)`: Mark onboarding complete
+- `incrementDeployAttempt(telegramId)`: Increment deployment attempts
+- `clearDeployAttempts(telegramId)`: Clear deployment attempts
+- `updateLastError(telegramId, error)`: Update last error
 
 #### Position Management
 
@@ -143,6 +150,12 @@ class Database {
 - `createAlert(userId, protocol, threshold)`: Create APY alert
 - `getUserAlerts(userId)`: Get user alerts
 - `deleteAlert(alertId)`: Delete alert
+
+#### Wallet Management
+
+- `saveWallet(telegramId, data)`: Save wallet data
+- `getWallet(telegramId)`: Get wallet by Telegram ID
+- `deleteWallet(telegramId)`: Delete wallet
 
 ## Usage Example
 

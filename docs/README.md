@@ -20,6 +20,7 @@ Welcome to the Bitcoin Yield Copilot documentation.
 - [PROTOCOLS.md](./PROTOCOLS.md) - DeFi protocol integrations
 - [UTILS.md](./UTILS.md) - Utilities and configuration
 - [CONTRACTS.md](./CONTRACTS.md) - Clarity smart contracts
+- [X402.md](./X402.md) - x402 payment integration
 
 ## Security
 

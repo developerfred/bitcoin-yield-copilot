@@ -66,6 +66,51 @@ Defines the interface for protocol adapters.
 - `withdraw`
 - `get-balance`
 
+### 6. Zest Adapter (`zest-adapter.clar`)
+
+Integration contract for Zest protocol.
+
+**Key Functions:**
+
+- `deposit`: Deposit into Zest vaults
+- `withdraw`: Withdraw from Zest vaults
+- `get-balance`: Check vault balance
+
+## Contract Addresses (Testnet)
+
+| Contract | Address |
+|----------|---------|
+| Wallet Factory | `ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPG5GM.user-wallet-factory` |
+| Withdraw Helper | `ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPG5GM.withdraw-helper` |
+
+## Contract Addresses (Mainnet)
+
+| Contract | Address |
+|----------|---------|
+| Wallet Factory | `SP000000000000000000002Q6VF78.user-wallet-factory` |
+| Withdraw Helper | `SP000000000000000000002Q6VF78.withdraw-helper` |
+
+## Clarity Error Codes
+
+| Code | Message |
+|------|---------|
+| 401 | Unauthorized |
+| 402 | Invalid signature |
+| 403 | Transaction limit exceeded |
+| 404 | Invalid nonce or expiration block |
+| 405 | Contract paused |
+| 406 | Unknown or disabled protocol |
+| 407 | Daily limit exceeded |
+| 408 | Contract not initialized |
+| 409 | Contract already initialized |
+| 410 | Invalid limits |
+| 411 | Zero amount not allowed |
+| 412 | Protocol already registered |
+| 413 | Allocation limit exceeded |
+| 414 | Insufficient balance |
+| 415 | Transaction expired |
+| 416 | Amount too small |
+
 ## Deployment
 
 Contracts are deployed using the Clarinet CLI:

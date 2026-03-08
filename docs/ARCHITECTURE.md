@@ -19,6 +19,7 @@ Bitcoin Yield Copilot is an autonomous Telegram agent that manages Bitcoin yield
 │  • Claude Sonnet (reasoning + intent)                   │
 │  • User preferences memory                               │
 │  • Yield strategy (own logic)                            │
+│  • ERC-8004 Identity (onchain reputation)              │
 └──────┬──────────────────────────┬───────────────────────┘
        │                          │
 ┌──────▼──────┐          ┌────────▼────────────────────────┐
@@ -28,6 +29,7 @@ Bitcoin Yield Copilot is an autonomous Telegram agent that manages Bitcoin yield
 │  sBTC/STX   │          │  • ALEX swap                   │
 └─────────────┘          │  • Bitflow LP                  │
                         │  • Hermetica vault              │
+                        │  • STX stacking                 │
                         └────────────────┬────────────────┘
                                          │
                         ┌────────────────▼────────────────┐
@@ -43,9 +45,11 @@ Bitcoin Yield Copilot is an autonomous Telegram agent that manages Bitcoin yield
 
 The bot layer handles all user interactions via Telegram:
 
-- **Handlers** (`src/bot/handlers/`): Command handlers for /start, /portfolio, /yields, /alerts, and AI-powered message processing
+- **Handlers** (`src/bot/handlers/`): Command handlers for /start, /portfolio, /yields, /alerts, /deposit, /withdraw, and AI-powered message processing
 - **Middleware** (`src/bot/middleware/`): Authentication, rate limiting, and error handling
 - **Wallet** (`src/bot/wallet/`): Wallet connection management via WebApp
+- **Auth** (`src/bot/auth/`): Telegram authentication callbacks
+- **Config** (`src/bot/config/`): Bot configuration
 
 ### 2. Agent Layer (`src/agent/`)
 
@@ -64,7 +68,22 @@ The Model Context Protocol server provides Stacks blockchain tools:
 - Transaction execution
 - Smart contract interactions
 
-### 4. Smart Contract Layer (`contracts/`)
+### 4. x402 Payments Layer (`src/x402/`)
+
+The x402 client handles payments for data feeds:
+
+- **Payment Requests**: Create and manage payment requests
+- **Endpoint Consumption**: Automatic payment for paid API endpoints
+- **Verification**: On-chain payment verification
+
+### 5. Security Layer (`src/security/`)
+
+Security utilities for the application:
+
+- **stacksCrypto**: Cryptographic operations for Stacks
+- **keyManager**: Key management and derivation
+
+### 6. Smart Contract Layer (`contracts/`)
 
 Clarity smart contracts manage user wallets:
 
@@ -72,16 +91,50 @@ Clarity smart contracts manage user wallets:
 - **wallet-factory.clar**: Factory for deploying user wallets
 - **withdraw-helper.clar**: Helper for withdrawals
 - **alex-adapter.clar**: ALEX protocol adapter
+- **zest-adapter.clar**: Zest protocol adapter
+- **adapter-trait.clar**: Adapter interface definition
+
+### 7. REST API Layer (`src/api/`)
+
+HTTP endpoints for external integrations:
+
+- **auth.ts**: User authentication
+- **keyDelivery.ts**: Secure key delivery
 
 ## Data Flow
 
-1. **User Message**: User sends message via Telegram
-2. **Handler Processing**: Bot handler processes command or forwards to AI
-3. **AI Reasoning**: Claude agent interprets intent and determines action
-4. **Tool Execution**: Agent calls appropriate tools (MCP or internal)
-5. **Transaction Building**: Payload builder creates signed transactions
-6. **Execution**: Transactions submitted to Stacks blockchain
-7. **Confirmation**: User receives confirmation with transaction hash
+### Deposit Flow
+
+```
+User (Telegram) → Bot Handler → Claude Agent → MCP Server
+                                                    ↓
+                                              Smart Contract
+                                                    ↓
+                                              Blockchain Confirmation
+                                                    ↓
+                                              User Notification
+```
+
+### Withdraw Flow
+
+```
+User (Telegram) → Bot Handler → Wallet Manager → Withdraw Helper
+                                                         ↓
+                                                    User Wallet Contract
+                                                         ↓
+                                                    Recipient Address
+                                                         ↓
+                                              Blockchain Confirmation
+```
+
+### Payment Flow (x402)
+
+```
+Agent → Data Endpoint (402) → x402 Facilitator → Payment
+                 ↓                                   ↓
+           Retry with                     On-chain Verification
+           Payment Proof
+```
 
 ## Security Model
 
@@ -90,6 +143,7 @@ Clarity smart contracts manage user wallets:
 - **Transaction Limits**: Configurable per-transaction and daily limits
 - **Encryption**: Sensitive data encrypted at rest
 - **Identity**: ERC-8004 integration for onchain agent identity
+- **Rate Limiting**: Prevents abuse via message frequency limits
 
 ## Module Reference
 
@@ -100,4 +154,7 @@ Clarity smart contracts manage user wallets:
 | API | `src/api/` | REST API endpoints |
 | Protocols | `src/protocols/` | DeFi protocol integrations |
 | Utils | `src/utils/` | Utility functions |
+| x402 | `src/x402/` | Payment client |
+| Security | `src/security/` | Cryptography & keys |
+| MCP | `src/mcp/` | MCP client |
 | Contracts | `contracts/` | Clarity smart contracts |
