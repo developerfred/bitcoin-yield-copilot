@@ -31,6 +31,7 @@ Welcome to the Bitcoin Yield Copilot documentation.
 
 - [Implementation.md](./Implementation.md) - Implementation details
 - [PLAN-MVP-TESTNET.md](./PLAN-MVP-TESTNET.md) - MVP plan
+- [TEST_REPORT.md](./TEST_REPORT.md) - Smart contracts test report
 
 ## Quick Links
 
