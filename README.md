@@ -73,8 +73,9 @@ Agent: [executes deposit, confirms onchain, sends receipt]
 | Identity | ERC-8004 (aibtcdev mainnet) |
 | Agent Payments | x402-stacks (sBTC/STX) |
 | Memory | SQLite local (preferences) + Stacks onchain (positions) |
-| Deploy | Railway / Fly.io (Node.js container) |
+| Deploy | Railway / Fly.io / Docker (Node.js container) |
 | Language | TypeScript |
+| Smart Contracts | Clarity (Stacks) |
 
 ---
 
@@ -92,6 +93,12 @@ Agent: [executes deposit, confirms onchain, sends receipt]
 - APY variation alerts (e.g., "notify me if Zest drops below 5%")
 - Transaction history with agent reasoning
 
+### Smart Contract Wallet
+- Each user gets a dedicated Clarity smart contract wallet
+- Factory pattern for wallet deployment
+- Authorized operations via Telegram user authentication
+- Configurable transaction and daily limits
+
 ### ERC-8004 Identity
 - Agent has an onchain verifiable identity
 - Every action executed is signed by the agent's identity
@@ -108,19 +115,22 @@ Agent: [executes deposit, confirms onchain, sends receipt]
 ### Prerequisites
 
 - Node.js 20+
+- npm or bun
 - Telegram Bot Token
 - Anthropic API Key
-- Stacks wallet with sBTC
+- Stacks wallet with sBTC (testnet for testing)
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/codingsh/bitcoin-yield-copilot.git
+git clone https://github.com/developerfred/bitcoin-yield-copilot.git
 cd bitcoin-yield-copilot
 
 # Install dependencies
 npm install
+# or
+bun install
 
 # Copy environment file
 cp .env.example .env
@@ -130,29 +140,54 @@ cp .env.example .env
 
 # Start development server
 npm run dev
+
+# Or start just the bot
+npm run dev:bot
+
+# Or start static server
+npm run dev:static
 ```
 
 ### Environment Variables
 
 ```env
-# Anthropic
+# Anthropic / OpenRouter
 ANTHROPIC_API_KEY=
+LLM_PROVIDER=anthropic  # or 'openrouter'
+OPENROUTER_API_KEY=
 
 # Telegram
 TELEGRAM_BOT_TOKEN=
 
-# Stacks
-AGENT_STACKS_PRIVATE_KEY=
-STACKS_NETWORK=mainnet
+# Stacks Network
+STACKS_NETWORK=testnet  # mainnet, testnet, or devnet
+STACKS_API_URL=https://stacks-node-api.testnet.alexlab.co
 
-# MCP Server (aibtcdev)
+# Wallet Connection
+APP_DOMAIN=https://bitcoin-yield.com
+APP_NAME=Bitcoin Yield Copilot
+MINI_APP_URL=
+
+# MCP Server
 AIBTC_MCP_SERVER_PATH=./node_modules/.bin/aibtc-mcp
+AIBTC_MCP_NETWORK=testnet
+MCP_USE_DOCKER=false
 
-# x402
+# x402 Payments
 X402_FACILITATOR_URL=https://x402.aibtc.com
 
-# ERC-8004
+# ERC-8004 Identity
 AGENT_IDENTITY_CONTRACT=
+
+# Database
+DATABASE_PATH=./data/agent.db
+
+# Encryption
+ENCRYPTION_KEY=your-32-char-encryption-key
+KEY_DERIVATION_SALT=your-16-char-salt
+
+# Logging
+LOG_LEVEL=info  # debug, info, warn, error
 ```
 
 ---
@@ -162,67 +197,131 @@ AGENT_IDENTITY_CONTRACT=
 ```
 bitcoin-yield-copilot/
 ├── src/
-│   ├── bot/
-│   │   ├── index.ts          # Grammy bot setup
-│   │   ├── handlers/         # Command handlers (/start, /portfolio, etc)
-│   │   └── middleware/       # Auth, rate limiting
 │   ├── agent/
-│   │   ├── copilot.ts        # Main agent loop (Claude API)
-│   │   ├── strategy.ts       # Yield decision logic
-│   │   ├── memory.ts         # User preferences (SQLite)
-│   │   └── identity.ts       # ERC-8004 integration
+│   │   ├── claude.ts         # Claude API integration
+│   │   └── database.ts       # SQLite database for users, positions, transactions
+│   ├── api/
+│   │   ├── auth.ts           # Authentication endpoints
+│   │   └── keyDelivery.ts    # Key delivery endpoints
+│   ├── bot/
+│   │   ├── auth/             # Telegram auth
+│   │   ├── config/           # Bot configuration
+│   │   ├── handlers/         # Command handlers
+│   │   │   ├── index.ts      # Main handlers (/start, /portfolio, /yields, /alerts)
+│   │   │   ├── onboarding.ts # User onboarding flow
+│   │   │   ├── deposit.ts   # Deposit operations
+│   │   │   ├── withdraw.ts  # Withdraw operations
+│   │   │   ├── protocols.ts # Protocol management
+│   │   │   ├── alex.ts      # ALEX DEX integration
+│   │   │   └── wallet.ts   # Wallet commands
+│   │   ├── middleware/       # Auth, rate limiting, error handling
+│   │   └── wallet/          # Wallet management
+│   │       ├── WalletManager.ts    # Main wallet manager
+│   │       ├── network.ts          # Network configuration
+│   │       ├── session.ts          # Session management
+│   │       └── connection.ts       # Wallet connection
+│   ├── protocols/
+│   │   └── alex.ts          # ALEX DeFi protocol integration
+│   ├── utils/
+│   │   └── payload-builder.ts # Transaction payload building
+│   ├── security/
+│   │   ├── stacksCrypto.ts  # Stacks cryptography
+│   │   └── keyManager.ts    # Key management
 │   ├── mcp/
-│   │   ├── client.ts         # MCP client for aibtc-mcp-server
-│   │   └── tools.ts          # Tool mappings used
+│   │   └── client.ts        # MCP client for aibtc-mcp-server
 │   ├── x402/
-│   │   └── client.ts         # Paid data feeds consumption
-│   └── protocols/
-│       ├── zest.ts           # Zest-specific helpers
-│       ├── alex.ts           # ALEX-specific helpers
-│       ├── hermetica.ts      # Hermetica-specific helpers
-│       └── bitflow.ts        # Bitflow-specific helpers
-├── contracts/                # Clarity contracts (if needed)
-├── tests/
-├── docs/
-├── .env.example
+│   │   └── client.ts         # x402 payment client
+│   ├── config.ts             # Environment configuration
+│   └── index.ts             # Entry point
+├── contracts/                # Clarity smart contracts
+│   ├── user-wallet.clar     # User wallet contract
+│   ├── wallet-factory.clar  # Wallet factory
+│   ├── withdraw-helper.clar # Withdraw helper
+│   ├── alex-adapter.clar    # ALEX protocol adapter
+│   └── adapter-trait.clar   # Adapter trait
+├── docs/                    # Documentation
+├── tests/                   # Test files
+├── .env.example             # Environment template
 ├── package.json
 └── README.md
 ```
 
 ---
 
-## Development Milestones
+## Smart Contracts
 
-### Week 1–2: Foundation
-- Repo setup, basic CI/CD (Railway)
-- Functional Telegram bot with `/start` and onboarding
-- Claude API integration with basic tool use
-- Connection to aibtc-mcp-server (testnet)
+The project includes Clarity smart contracts for secure wallet management:
 
-### Week 3–4: Core Yield
-- Real-time APY reading (Zest, ALEX, Hermetica, Bitflow)
-- Deposit execution via MCP (testnet)
-- Transaction confirmation + notifications
-- Functional portfolio overview
+| Contract | Purpose |
+|----------|---------|
+| `user-wallet.clar` | Individual user wallet with authorized operations |
+| `wallet-factory.clar` | Factory for deploying user wallets |
+| `withdraw-helper.clar` | Helper for withdrawals with fee management |
+| `alex-adapter.clar` | ALEX protocol integration |
+| `adapter-trait.clar` | Trait defining adapter interface |
 
-### Week 5–6: Memory and Strategy
-- User preferences memory system (SQLite)
-- Risk profile logic in agent
-- APY variation alerts
-- Action history with reasoning
+---
 
-### Week 7–8: Identity and x402
-- ERC-8004 integration (agent identity onchain)
-- Data feeds consumption via x402 (sBTC)
-- Testnet → mainnet migration
-- Tests with real users (5–10 beta users)
+## Commands
 
-### Week 9–10: Polish and Launch
-- UX refinement based on feedback
-- Complete documentation (README, usage guide)
-- Stable production deployment
-- Onboarding 20+ real users
-- Launch post on Stacks Forum + Twitter
+| Command | Description |
+|---------|-------------|
+| `/start` | Start or restart onboarding |
+| `/connect` | Connect or reconnect wallet |
+| `/wallet` | View contract wallet info |
+| `/yields` | Discover current yield opportunities |
+| `/portfolio` | View your positions |
+| `/alex` | Access ALEX DEX |
+| `/deposit` | Deposit funds |
+| `/withdraw` | Withdraw funds |
+| `/alerts` | Manage APY alerts |
+| `/help` | Show help message |
+
+---
+
+## Development
+
+### Running Tests
+
+```bash
+npm test
+```
+
+### Building
+
+```bash
+npm run build
+```
+
+### Production
+
+```bash
+npm start
+```
+
+### Docker
+
+```bash
+docker build -t bitcoin-yield-copilot .
+docker run -p 3000:3000 --env-file .env bitcoin-yield-copilot
+```
+
+---
+
+## Documentation
+
+See the `docs/` directory for comprehensive documentation:
+
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) - System architecture
+- [BOT.md](./docs/BOT.md) - Telegram bot module
+- [AGENT.md](./docs/AGENT.md) - AI agent module
+- [API.md](./docs/API.md) - REST API documentation
+- [PROTOCOLS.md](./docs/PROTOCOLS.md) - DeFi protocol integrations
+- [UTILS.md](./docs/UTILS.md) - Utilities and configuration
+- [CONTRACTS.md](./docs/CONTRACTS.md) - Clarity smart contracts
+- [DEPLOYMENT.md](./docs/DEPLOYMENT.md) - Deployment guide
+- [CONTRIBUTING.md](./docs/CONTRIBUTING.md) - Contribution guidelines
+- [SECURITY.md](./docs/SECURITY.md) - Security considerations
 
 ---
 
@@ -250,13 +349,24 @@ bitcoin-yield-copilot/
 
 ---
 
-## Post-Grant: Growth Roadmap
+## Roadmap
 
-**Phase 2 (months 3–6):** Autonomous rebalancing without manual approval, more protocol support, web version
+### Phase 1 (Current MVP)
+- Telegram bot with natural language interface
+- Wallet connection via WebApp
+- Deposit/withdraw to DeFi protocols
+- Portfolio overview
+- Risk profiles and alerts
 
-**Phase 3 (months 6–12):** Multi-user with shared strategies, sBTC cross-chain integration (Wormhole), revenue model (fee on yield generated)
+### Phase 2 (Months 3-6)
+- Autonomous rebalancing without manual approval
+- More protocol support
+- Web version
 
-**Sustainability:** 0.1–0.5% performance fee on yield generated by agent. With $100K in managed TVL = ~$500–2,500/year in fees. Not dependent on grants to survive.
+### Phase 3 (Months 6-12)
+- Multi-user with shared strategies
+- sBTC cross-chain integration (Wormhole)
+- Revenue model (fee on yield generated)
 
 ---
 
