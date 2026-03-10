@@ -1,13 +1,13 @@
-import Database from 'better-sqlite3';
-import { config } from '../../config.js';
-import { createLogger } from 'pino';
+import BetterSqlite3 from 'better-sqlite3';
+import { config } from '../config.js';
+import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
 
-const logger = createLogger({ name: 'database' });
+const logger = pino({ name: 'database' });
 
 export class Database {
-  private db: Database.Database;
+  private db: BetterSqlite3.Database;
 
   constructor(dbPath?: string) {
     const finalPath = dbPath ?? config.database.path;
@@ -18,7 +18,7 @@ export class Database {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    this.db = new Database(finalPath);
+    this.db = new BetterSqlite3(finalPath);
     this.init();
   }
 
@@ -202,6 +202,8 @@ export class Database {
   close(): void {
     this.db.close();
   }
+}
+
 let _db: Database | null = null;
 
 export function getDatabase(dbPath?: string): Database {
@@ -210,7 +212,5 @@ export function getDatabase(dbPath?: string): Database {
   }
   return _db;
 }
-
-export { Database };
 
 export const db = new Database();

@@ -18,6 +18,8 @@ import {
 } from '../wallet/WalletManager.js';
 import Database from 'better-sqlite3';
 import { API_CONFIG } from '../config/apis.js';
+import { getDatabase } from '../../agent/database.js';
+import { AuthMiddleware } from '../middleware/auth.js';
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -524,6 +526,15 @@ async function deployContractWallet(
       protocols,
     );
 
+    try {
+      const db = getDatabase();
+      const auth = new AuthMiddleware(db);
+      await auth.completeOnboarding(String(telegramId), walletRecord.contractAddress);
+      console.log(`[Onboarding] User ${telegramId} marked as onboarded in auth system`);
+    } catch (authErr) {      
+      console.error('[Onboarding] Failed to sync auth state:', authErr);
+    }
+
     await updateProgress(progressMsg.message_id,
       `⚙️ *Creating your contract wallet…*\n\n` +
       `✅ Step 1 — Preparation complete\n` +
@@ -594,13 +605,16 @@ export function registerOnboardingHandlers(bot: Bot<Context>) {
   // /start - Inicia o fluxo de onboarding
   // --------------------------------------------------------------------------
   bot.command('start', async (ctx) => {
+    console.log('[DEBUG /start] ========== HANDLER CALLED ==========');
     const userId = ctx.from!.id;
+    console.log('[DEBUG /start] Received from user:', userId);
 
     try {
-      OnboardingDatabase.getInstance();
-      
+      console.log('[DEBUG /start] Getting wallet manager...');
       const walletManager = await getWalletManager();
+      console.log('[DEBUG /start] Wallet manager ready, checking wallet...');
       const existing = walletManager.getCachedWallet(String(userId));
+      console.log('[DEBUG /start] Existing wallet:', existing);
 
       if (existing?.isActive) {
         const withdrawal = OnboardingDatabase.loadWithdrawalAddress(userId);
@@ -675,7 +689,7 @@ export function registerOnboardingHandlers(bot: Bot<Context>) {
     bot.hears(`${preset.emoji} ${preset.label}`, async (ctx) => {
       const userId = ctx.from!.id;
       const state = OnboardingDatabase.loadState(userId);
-      if (!state || state.step !== 'risk') return;
+      if (!state || state.step !== 'risk') return next();
 
       OnboardingDatabase.saveState(userId, {
         ...state,
@@ -703,7 +717,7 @@ export function registerOnboardingHandlers(bot: Bot<Context>) {
     bot.hears(label, async (ctx) => {
       const userId = ctx.from!.id;
       const state = OnboardingDatabase.loadState(userId);
-      if (!state || state.step !== 'tokens') return;
+      if (!state || state.step !== 'tokens') return next();
 
       const deployingState: OnboardingState = {
         ...state,
@@ -866,3 +880,7 @@ process.on('SIGTERM', () => {
   OnboardingDatabase.close();
   process.exit(0);
 });
+
+function next(): unknown {
+  throw new Error('Function not implemented.');
+}
