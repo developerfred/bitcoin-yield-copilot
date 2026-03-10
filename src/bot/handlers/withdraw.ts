@@ -103,7 +103,8 @@ async function getContractStxBalance(contractAddress: string, network: string): 
 }
 
 export function registerWithdrawHandler(bot: Bot<Context>) {
-  
+  console.log('[withdraw] Registering /withdraw command handler');
+
   // --------------------------------------------------------------------------
   // /setwallet - Define ou mostra endereço de saque
   // --------------------------------------------------------------------------
@@ -205,159 +206,80 @@ export function registerWithdrawHandler(bot: Bot<Context>) {
   // --------------------------------------------------------------------------
   // /withdraw - Inicia processo de saque
   // --------------------------------------------------------------------------
-  bot.command('withdraw', async (ctx) => {
-    const userId = String(ctx.from!.id);
-    const args = ctx.message?.text?.split(/\s+/).slice(1) ?? [];
-    
-    // Verifica se tem wallet
-    const walletManager = await getWalletManager();
-    const wallet = walletManager.getCachedWallet(userId);
-    
-    if (!wallet) {
-      return ctx.reply('❌ No wallet found. Use /start to create one.');
-    }
 
-    // Carrega endereço salvo
-    const destination = loadWithdrawalAddress(userId);
-    
-    // Se não tem endereço ou não forneceu amount, mostra ajuda
-    if (!destination) {
-      return ctx.reply(
-        `💸 *Withdraw STX*\n\n` +
-        `First set a withdrawal address:\n` +
-        `\`/setwallet <your-stacks-address>\`\n\n` +
-        `Then use: \`/withdraw <amount>\``,
-        { parse_mode: 'Markdown' }
-      );
-    }
+  bot.callbackQuery(/withdraw:(confirm|cancel)/, async (ctx) => {
+    console.log('[DEBUG callback] ===== CALLBACK RECEIVED =====');
+    console.log('[DEBUG callback] Full callback data:', ctx.callbackQuery);
 
-    // Se não forneceu amount, mostra saldo e limites
-    if (args.length === 0) {
-      const balance = await getContractStxBalance(wallet.contractAddress, wallet.network);
-      const limits = await walletManager.getRemainingLimits(userId);
-      
-      const balanceSTX = Number(balance) / STX_DECIMALS;
-      const maxPerTxSTX = limits ? Number(limits.maxPerTx) / STX_DECIMALS : 0;
-      
-      return ctx.reply(
-        `💸 *Withdraw STX*\n\n` +
-        `Your saved address: \`${destination}\`\n` +
-        `Contract balance: ${balanceSTX.toFixed(6)} STX\n` +
-        `Max per tx: ${maxPerTxSTX.toFixed(6)} STX\n\n` +
-        `Usage: \`/withdraw <amount>\`\n` +
-        `Example: \`/withdraw 10\``,
-        { parse_mode: 'Markdown' }
-      );
-    }
-
-    // Valida o amount
-    const amount = parseFloat(args[0]);
-    if (isNaN(amount) || amount <= 0) {
-      return ctx.reply('❌ Please enter a valid positive amount.');
-    }
-
-    // Verifica se tem saldo suficiente
-    const balance = await getContractStxBalance(wallet.contractAddress, wallet.network);
-    const amountMicro = BigInt(Math.round(amount * STX_DECIMALS));
-    
-    if (amountMicro > balance) {
-      return ctx.reply(
-        `❌ *Insufficient balance*\n\n` +
-        `You have ${Number(balance) / STX_DECIMALS} STX available.\n` +
-        `Requested: ${amount} STX`,
-        { parse_mode: 'Markdown' }
-      );
-    }
-
-    // Verifica limites
-    const limits = await walletManager.getRemainingLimits(userId);
-    if (limits) {
-      if (amountMicro > limits.maxPerTx) {
-        return ctx.reply(
-          `❌ *Amount exceeds per-transaction limit*\n\n` +
-          `Max per transaction: ${Number(limits.maxPerTx) / STX_DECIMALS} STX`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-      
-      if (amountMicro > limits.remainingToday) {
-        return ctx.reply(
-          `❌ *Amount exceeds daily remaining limit*\n\n` +
-          `Available today: ${Number(limits.remainingToday) / STX_DECIMALS} STX`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    }
-
-    // Confirma o endereço de saque
-    const confirmKeyboard = {
-      inline_keyboard: [
-        [{ 
-          text: '✅ Confirm', 
-          callback_data: `withdraw:confirm:${amount}:${destination}` 
-        }],
-        [{ 
-          text: '❌ Cancel', 
-          callback_data: 'withdraw:cancel' 
-        }]
-      ]
-    };
-
-    const limitText = limits 
-      ? `\n\n*Limits:*\n• Max per tx: ${Number(limits.maxPerTx) / STX_DECIMALS} STX\n• Available today: ${Number(limits.remainingToday) / STX_DECIMALS} STX`
-      : '';
-
-    await ctx.reply(
-      `⚠️ *Confirm Withdrawal*\n\n` +
-      `Amount: ${amount} STX\n` +
-      `To: \`${destination}\`\n` +
-      `From: \`${wallet.contractAddress}\`` +
-      limitText,
-      { parse_mode: 'Markdown', reply_markup: confirmKeyboard }
-    );
-  });
-
-  // --------------------------------------------------------------------------
-  // Callback para confirmar/cancelar saque
-  // --------------------------------------------------------------------------
-  bot.callbackQuery(/withdraw:(confirm|cancel)(?::(.*))?/, async (ctx) => {
     const data = ctx.callbackQuery.data;
+    console.log('[DEBUG callback] Callback data string:', data);
+
     const parts = data.split(':');
+    console.log('[DEBUG callback] Split parts:', parts);
+
     const action = parts[1];
     const userId = String(ctx.from.id);
 
+    console.log('[DEBUG callback] Action:', action);
+    console.log('[DEBUG callback] User ID:', userId);
+    console.log('[DEBUG callback] Parts length:', parts.length);
+    console.log('[DEBUG callback] All parts:', parts);
+
     // Cancela a operação
     if (action === 'cancel') {
+      console.log('[DEBUG callback] Processing cancel');
       await ctx.answerCallbackQuery({ text: 'Withdrawal cancelled' });
       await ctx.editMessageText('❌ Withdrawal cancelled.');
+      console.log('[DEBUG callback] Cancel completed');
       return;
     }
 
     // Confirma e executa o saque
     if (action === 'confirm') {
-      const amount = parseFloat(parts[2]);
-      const destination = parts[3];
+      console.log('[DEBUG callback] Processing confirm');
 
+      // Pega o amount e destination dos próximos partes
+      const amount = parseFloat(parts[2]);
+      const destination = parts.slice(3).join(':'); // Junta caso o endereço tenha :
+
+      console.log('[DEBUG callback] Extracted amount:', amount);
+      console.log('[DEBUG callback] Extracted destination:', destination);
+
+      if (!amount || !destination) {
+        console.log('[DEBUG callback] Missing amount or destination');
+        await ctx.answerCallbackQuery({ text: 'Invalid withdrawal data' });
+        await ctx.editMessageText('❌ Invalid withdrawal request. Please try again.');
+        return;
+      }
+
+      console.log('[DEBUG callback] Answering callback query...');
       await ctx.answerCallbackQuery({ text: 'Processing withdrawal...' });
+
+      console.log('[DEBUG callback] Editing message...');
       await ctx.editMessageText('⏳ Broadcasting transaction to Stacks...\n\nThis may take 30-60 seconds...');
 
       try {
-        const amountMicro = BigInt(Math.round(amount * STX_DECIMALS));
-        
+        console.log('[DEBUG callback] Getting wallet manager...');
         const walletManager = await getWalletManager();
+
+        console.log('[DEBUG callback] Getting cached wallet...');
         const wallet = walletManager.getCachedWallet(userId);
-        
+
         if (!wallet) {
           throw new Error('Wallet not found');
         }
 
-        console.log(`[withdraw] Executing withdrawal:`, {
+        console.log('[DEBUG callback] Calculating amount in microSTX...');
+        const amountMicro = BigInt(Math.round(amount * STX_DECIMALS));
+
+        console.log(`[DEBUG callback] Executing withdrawal:`, {
           userId,
           amount: amountMicro.toString(),
           destination
         });
 
         // Executa o saque
+        console.log('[DEBUG callback] Calling withdrawStx...');
         const result = await walletManager.withdrawStx(
           userId,
           destination,
@@ -365,12 +287,13 @@ export function registerWithdrawHandler(bot: Bot<Context>) {
           10  // expiry blocks
         );
 
-        console.log(`[withdraw] Auth TX: ${result.txIdAuth}, Withdraw TX: ${result.txIdWithdraw}`);
+        console.log(`[DEBUG callback] Withdrawal result:`, result);
 
         const explorerBase = wallet.network === 'mainnet'
           ? 'https://explorer.hiro.so/txid'
           : 'https://explorer.hiro.so/txid?chain=testnet';
 
+        console.log('[DEBUG callback] Sending success message');
         await ctx.editMessageText(
           `✅ *Withdrawal Initiated*\n\n` +
           `Amount: ${amount} STX\n` +
@@ -387,10 +310,10 @@ export function registerWithdrawHandler(bot: Bot<Context>) {
         );
 
       } catch (error) {
-        console.error('[withdraw] Error:', error);
-        
+        console.error('[DEBUG callback] Error:', error);
+
         let errorMessage = (error as Error).message || 'Unknown error';
-        
+
         // Mapear erros comuns do contrato
         if (errorMessage.includes('423')) {
           errorMessage = 'Wallet não registrada no withdraw-helper.';
@@ -414,7 +337,10 @@ export function registerWithdrawHandler(bot: Bot<Context>) {
         );
       }
     }
+
+    console.log('[DEBUG callback] ===== CALLBACK COMPLETED =====');
   });
+
 
   // --------------------------------------------------------------------------
   // /txstatus - Verifica status de uma transação

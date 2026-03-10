@@ -32,9 +32,9 @@ const envSchema = z.object({
 
   // Logging
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-
-  // Session
-  SESSION_DURATION_MS: z.coerce.number().default(30 * 60 * 1000), // 30 minutes
+  // Encryption
+  ENCRYPTION_KEY: z.string().min(32).default('default-encryption-key-must-be-32-chars'),
+  KEY_DERIVATION_SALT: z.string().min(16).default('default-key-salt'),
 });
 
 export const config = {
@@ -53,10 +53,13 @@ export const config = {
   wallet: {
     appDomain: process.env.APP_DOMAIN ?? 'https://bitcoin-yield.com',
     appName: process.env.APP_NAME ?? 'Bitcoin Yield Copilot',
+    miniAppUrl: process.env.MINI_APP_URL ?? '',
   },
   mcp: {
-    serverPath: process.env.AIBTC_MCP_SERVER_PATH ?? './node_modules/.bin/aibtc-mcp',
+    serverPath: process.env.AIBTC_MCP_SERVER_PATH ?? './node_modules/.bin/aibtc-mcp-server',
     network: (process.env.AIBTC_MCP_NETWORK ?? 'testnet') as 'mainnet' | 'testnet' | 'devnet',
+    useDocker: process.env.MCP_USE_DOCKER === 'true',
+    dockerContainer: process.env.MCP_DOCKER_CONTAINER ?? 'aibtc-mcp-server',
   },
   x402: {
     facilitatorUrl: process.env.X402_FACILITATOR_URL ?? 'https://x402.aibtc.com',
@@ -70,11 +73,14 @@ export const config = {
   session: {
     durationMs: parseInt(process.env.SESSION_DURATION_MS ?? '1800000', 10),
   },
+  encryption: {
+    key: process.env.ENCRYPTION_KEY ?? 'default-encryption-key-must-be-32-chars',
+    salt: process.env.KEY_DERIVATION_SALT ?? 'default-key-salt',
+  },
   log: {
     level: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   },
 };
-
 // Validate at startup
 try {
   envSchema.parse(process.env);

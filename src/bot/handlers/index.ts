@@ -1,12 +1,15 @@
 /**
- * handlers.ts — Main bot handlers (PATCHED)
+ * handlers.ts — Main bot handlers
  *
- * Changes:
- * 1. Import getWalletManager instead of walletManager (async initialization)
- * 2. Add await getWalletManager() in all places that use the wallet
- * 3. Better error handling for uninitialized wallet
- * 4. Add check for wallet availability before operations
- * 5. FIX: Handler order (commands first, then modules)
+ * Architecture:
+ * 1. auth.middleware() is registered ONCE via bot.use() — it attaches the
+ *    session to ctx and always calls next(), so NO command is ever swallowed.
+ * 2. Public commands (/start, /help, /test) are declared first and bypass
+ *    all session logic inside auth.middleware() via PUBLIC_COMMANDS allowlist.
+ * 3. Protected commands use auth.requireOnboarded() as a per-route guard.
+ * 4. Module handlers (onboarding, alex, withdraw, protocols) are registered
+ *    after the core commands.
+ * 5. The AI text handler is last — lowest priority.
  */
 
 import { Bot, Context, InlineKeyboard } from 'grammy';
@@ -14,16 +17,19 @@ import { getDatabase } from '../../agent/database.js';
 import { AuthMiddleware } from '../middleware/auth.js';
 import { mcpClient } from '../../mcp/client.js';
 import { ClaudeAgent, Tool, IncomingMessage } from '../../agent/claude.js';
-import { getWalletManager } from '../wallet/WalletManager.js'; 
+import { getWalletManager } from '../wallet/WalletManager.js';
 import { registerOnboardingHandlers } from './onboarding.js';
 import { registerAlexHandlers } from './alex.js';
-import { registerDepositHandlers } from './deposit.js';
 import { registerWithdrawHandler } from './withdraw.js';
+import { registerDepositHandlers } from './deposit.js';
 import { registerProtocolHandlers } from './protocols.js';
+import { syncOnboardingToAuth } from '../../utils/syncOnboardingState.js';
 
 import pino from 'pino';
 
 const logger = pino({ name: 'bot:handlers' });
+
+const STX_DECIMALS = 1_000_000;
 
 const agentTools: Tool[] = [
   {
@@ -75,36 +81,42 @@ const agentTools: Tool[] = [
   },
 ];
 
-// Mapeia protocol name → contract principal (env vars)
 function resolveProtocolAddress(protocolName: string): string {
   const map: Record<string, string | undefined> = {
-    zest:      process.env.ZEST_CONTRACT,
-    alex:      process.env.ALEX_CONTRACT,
+    zest: process.env.ZEST_CONTRACT,
+    alex: process.env.ALEX_CONTRACT,
     hermetica: process.env.HERMETICA_CONTRACT,
-    bitflow:   process.env.BITFLOW_CONTRACT,
+    bitflow: process.env.BITFLOW_CONTRACT,
   };
   const addr = map[protocolName.toLowerCase()];
   if (!addr) throw new Error(`Unknown protocol: ${protocolName}`);
   return addr;
 }
 
+// ============================================================================
+// MAIN SETUP
+// ============================================================================
+
 export function setupHandlers(bot: Bot<Context>) {
+  logger.info('Setting up handlers...');
+
   const db = getDatabase();
   const auth = new AuthMiddleware(db);
   const claudeAgent = new ClaudeAgent();
 
-  // ==========================================================================
-  // 1. COMMAND HANDLERS (ALTA PRIORIDADE)
-  // ==========================================================================
-  // Estes handlers são executados primeiro e respondem a comandos como /help
+  bot.use(auth.middleware());
 
-  // ── /help ────────────────────────────────────────────────────
+  syncOnboardingToAuth().catch(err =>
+    logger.error({ err }, 'Failed to sync onboarding state')
+  );
+
+
+  // ── /help ─────────────────────────────────────────────────────────────────
   bot.command('help', async (ctx) => {
     await ctx.reply(
       `📖 *Bitcoin Yield Copilot Help*\n\n` +
       `*Commands:*\n` +
       `/start — Start or restart onboarding\n` +
-      `/connect — Connect or reconnect wallet\n` +
       `/wallet — View your contract wallet info\n` +
       `/yields — Discover current yield opportunities\n` +
       `/portfolio — View your positions\n` +
@@ -116,11 +128,24 @@ export function setupHandlers(bot: Bot<Context>) {
       `• "Put my sBTC to work"\n` +
       `• "What's my portfolio?"\n` +
       `• "Withdraw from Zest"`,
-      { parse_mode: 'Markdown' }
+      { parse_mode: 'Markdown' },
     );
   });
 
-  // ── /yields ──────────────────────────────────────────────────
+  // ==========================================================================
+  // STEP 3 — Module handlers (onboarding registers /start internally)
+  // ==========================================================================
+  registerOnboardingHandlers(bot);  // registers /start, /wallet, /txs, /setwallet
+  registerAlexHandlers(bot);
+  registerDepositHandlers(bot);  // registers /withdraw, /deposit
+  registerWithdrawHandler(bot);  // registers /setwallet, /removewallet, callbacks
+  registerProtocolHandlers(bot);
+
+  // ==========================================================================
+  // STEP 4 — Protected commands (require completed onboarding)
+  // ==========================================================================
+
+  // ── /yields ───────────────────────────────────────────────────────────────
   bot.command('yields', async (ctx) => {
     await ctx.reply('🔍 Fetching yield opportunities...');
     try {
@@ -141,74 +166,68 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── /portfolio ───────────────────────────────────────────────
-  bot.command('portfolio', async (ctx) => {
-    const telegramId = String(ctx.from?.id);
-    const session = await auth.getSession(telegramId);
-    if (!session?.isOnboarded) return ctx.reply('Please complete onboarding first: /start');
+  // ── /portfolio ────────────────────────────────────────────────────────────
+  bot.command(
+    'portfolio',
+    auth.requireOnboarded(),
+    async (ctx) => {
+      const telegramId = String(ctx.from?.id);
+      try {
+        const walletManager = await getWalletManager();
+        const user = await db.getUser(telegramId);
+        const positions = user ? await db.getUserPositions(user.id) : [];
+        const contractAddress = walletManager.getAddress(telegramId);
 
-    try {
-      const walletManager = await getWalletManager();
-      const user = await db.getUser(telegramId);
-      const positions = user ? await db.getUserPositions(user.id) : [];
-      const contractAddress = walletManager.getAddress(telegramId);
+        let msg = `📊 *Your Portfolio*\n\nContract: \`${contractAddress ?? 'not set'}\`\n\n`;
 
-      let msg = `📊 *Your Portfolio*\n\nContract: \`${contractAddress ?? 'not set'}\`\n\n`;
-
-      if (positions.length === 0) {
-        msg += 'No active positions.\n\nUse /yields to discover opportunities!';
-      } else {
-        let total = 0;
-        for (const pos of positions as any[]) {
-          msg += `• ${pos.protocol}: ${pos.amount} ${pos.token} @ ${pos.apy}% APY\n`;
-          total += pos.amount;
+        if (positions.length === 0) {
+          msg += 'No active positions.\n\nUse /yields to discover opportunities!';
+        } else {
+          let total = 0;
+          for (const pos of positions as any[]) {
+            msg += `• ${pos.protocol}: ${pos.amount} ${pos.token} @ ${pos.apy}% APY\n`;
+            total += pos.amount;
+          }
+          msg += `\nTotal: ${total} sBTC`;
         }
-        msg += `\nTotal: ${total} sBTC`;
+        await ctx.reply(msg, { parse_mode: 'Markdown' });
+      } catch (err) {
+        logger.error({ err }, 'Failed to get portfolio');
+        await ctx.reply('❌ Failed to fetch portfolio. Please try again later.');
       }
-      await ctx.reply(msg, { parse_mode: 'Markdown' });
-    } catch (err) {
-      logger.error({ err }, 'Failed to get portfolio');
-      await ctx.reply('❌ Failed to fetch portfolio. Please try again later.');
-    }
-  });
+    },
+  );
 
-  // ── /alerts ──────────────────────────────────────────────────
-  bot.command('alerts', async (ctx) => {
-    const telegramId = String(ctx.from?.id);
-    const session = await auth.getSession(telegramId);
-    if (!session?.isOnboarded) return ctx.reply('Please complete onboarding first: /start');
+  // ── /alerts ───────────────────────────────────────────────────────────────
+  bot.command(
+    'alerts',
+    auth.requireOnboarded(),
+    async (ctx) => {
+      const telegramId = String(ctx.from?.id);
+      try {
+        const user = await db.getUser(telegramId);
+        const alerts = user ? await db.getUserAlerts(user.id) : [];
 
-    try {
-      const user = await db.getUser(telegramId);
-      const alerts = user ? await db.getUserAlerts(user.id) : [];
+        if (alerts.length === 0) {
+          return ctx.reply(
+            '📢 No active alerts.\n\nSay "Alert me if Zest drops below 5%" to create one.',
+          );
+        }
 
-      if (alerts.length === 0) {
-        return ctx.reply('📢 No active alerts.\n\nSay "Alert me if Zest drops below 5%" to create one.');
+        let msg = '📢 *Your APY Alerts:*\n\n';
+        for (const alert of alerts as any[]) {
+          msg += `• ${alert.protocol}: below ${alert.threshold}%\n`;
+        }
+        await ctx.reply(msg, { parse_mode: 'Markdown' });
+      } catch (err) {
+        logger.error({ err }, 'Failed to get alerts');
+        await ctx.reply('❌ Failed to fetch alerts. Please try again later.');
       }
-
-      let msg = '📢 *Your APY Alerts:*\n\n';
-      for (const alert of alerts as any[]) msg += `• ${alert.protocol}: below ${alert.threshold}%\n`;
-      await ctx.reply(msg, { parse_mode: 'Markdown' });
-    } catch (err) {
-      logger.error({ err }, 'Failed to get alerts');
-      await ctx.reply('❌ Failed to fetch alerts. Please try again later.');
-    }
-  });
+    },
+  );
 
   // ==========================================================================
-  // 2. MODULE HANDLERS (MÉDIA PRIORIDADE)
-  // ==========================================================================
-  // Estes handlers registram comandos específicos de cada módulo
-  // e callbacks para interações inline
-
-  registerAlexHandlers(bot);      // Registra /alex, menus e swaps
-  registerOnboardingHandlers(bot); // Registra /start e fluxo de onboarding
-  //registerDepositHandlers(bot);    // Registra /deposit e /withdraw
-  registerWithdrawHandler(bot);
-  registerProtocolHandlers(bot);
-
-  // ==========================================================================
-  // 3. HELPER FUNCTIONS
+  // STEP 5 — Callback query handlers
   // ==========================================================================
 
   async function ensureWalletReady(telegramId: string, ctx: Context): Promise<boolean> {
@@ -221,16 +240,14 @@ export function setupHandlers(bot: Bot<Context>) {
       return true;
     } catch (err) {
       logger.error({ err }, 'Wallet not ready');
-      await ctx.editMessageText('❌ Wallet system is still initializing. Please try again in a few seconds.');
+      await ctx.editMessageText(
+        '❌ Wallet system is still initializing. Please try again in a few seconds.',
+      );
       return false;
     }
   }
 
-  // ==========================================================================
-  // 4. CALLBACK HANDLERS
-  // ==========================================================================
-
-  // ── Callback: confirm deposit — MODELO C ─────────────────────
+  // ── confirm deposit ───────────────────────────────────────────────────────
   bot.callbackQuery(/confirm_deposit_(.+)_(\d+\.?\d*)/, async (ctx) => {
     const [, protocolName, amountStr] = ctx.match;
     const telegramId = String(ctx.from?.id);
@@ -238,22 +255,19 @@ export function setupHandlers(bot: Bot<Context>) {
 
     try {
       const walletManager = await getWalletManager();
-      
       if (!await ensureWalletReady(telegramId, ctx)) return;
 
-      // Verifica limites antes de tentar
       const limits = await walletManager.getRemainingLimits(telegramId);
-      const amountMicro = BigInt(Math.floor(parseFloat(amountStr) * 1_000_000));
+      const amountMicro = BigInt(Math.floor(parseFloat(amountStr) * STX_DECIMALS));
 
       if (limits && amountMicro > limits.maxPerTx) {
         return ctx.editMessageText(
-          `❌ Amount exceeds per-tx limit (${Number(limits.maxPerTx) / 1_000_000} STX).\n` +
-          `Adjust in /wallet settings.`
+          `❌ Amount exceeds per-tx limit (${Number(limits.maxPerTx) / STX_DECIMALS} STX).\nAdjust in /wallet settings.`,
         );
       }
       if (limits && amountMicro > limits.remainingToday) {
         return ctx.editMessageText(
-          `❌ Daily limit reached. Remaining: ${Number(limits.remainingToday) / 1_000_000} STX.`
+          `❌ Daily limit reached. Remaining: ${Number(limits.remainingToday) / STX_DECIMALS} STX.`,
         );
       }
 
@@ -266,9 +280,10 @@ export function setupHandlers(bot: Bot<Context>) {
         amountMicro,
       );
 
-      // Persiste posição localmente para /portfolio
       const user = await db.getUser(telegramId);
-      if (user) await db.createPosition(user.id, protocolName, 'sBTC', parseFloat(amountStr), 0, result.txId);
+      if (user) {
+        await db.createPosition(user.id, protocolName, 'sBTC', parseFloat(amountStr), 0, result.txId);
+      }
 
       await ctx.editMessageText(
         `✅ *Deposit submitted!*\n\n` +
@@ -276,7 +291,7 @@ export function setupHandlers(bot: Bot<Context>) {
         `Protocol: ${protocolName}\n` +
         `Tx: \`${result.txId}\`\n\n` +
         `[View on Explorer](${process.env.STACKS_EXPLORER_URL ?? 'https://explorer.stacks.co'}/txid/${result.txId})`,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'Markdown' },
       );
     } catch (err: any) {
       logger.error({ err }, 'Deposit failed');
@@ -284,7 +299,7 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── Callback: confirm withdraw — MODELO C ────────────────────
+  // ── confirm withdraw ──────────────────────────────────────────────────────
   bot.callbackQuery(/confirm_withdraw_(.+)_(\d+\.?\d*)/, async (ctx) => {
     const [, protocolName, amountStr] = ctx.match;
     const telegramId = String(ctx.from?.id);
@@ -292,12 +307,11 @@ export function setupHandlers(bot: Bot<Context>) {
 
     try {
       const walletManager = await getWalletManager();
-      
       if (!await ensureWalletReady(telegramId, ctx)) return;
 
       await ctx.editMessageText(`⏳ Submitting withdrawal from ${protocolName}...`);
 
-      const amountMicro = BigInt(Math.floor(parseFloat(amountStr) * 1_000_000));
+      const amountMicro = BigInt(Math.floor(parseFloat(amountStr) * STX_DECIMALS));
       const result = await walletManager.executeOperation(
         telegramId,
         resolveProtocolAddress(protocolName),
@@ -311,7 +325,7 @@ export function setupHandlers(bot: Bot<Context>) {
         `Protocol: ${protocolName}\n` +
         `Tx: \`${result.txId}\`\n\n` +
         `[View on Explorer](${process.env.STACKS_EXPLORER_URL ?? 'https://explorer.stacks.co'}/txid/${result.txId})`,
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'Markdown' },
       );
     } catch (err: any) {
       logger.error({ err }, 'Withdrawal failed');
@@ -319,25 +333,23 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── Callback: cancel ──────────────────────────────────────────
+  // ── cancel ────────────────────────────────────────────────────────────────
   bot.callbackQuery('cancel_action', async (ctx) => {
     await ctx.answerCallbackQuery('Action cancelled');
     await ctx.editMessageText('❌ Action cancelled');
   });
 
   // ==========================================================================
-  // 5. AI MESSAGE HANDLER (BAIXA PRIORIDADE)
+  // STEP 6 — AI free-text handler (lowest priority, last registered)
   // ==========================================================================
-  // Este handler só é executado se nenhum comando ou callback matching for encontrado
-
   bot.on('message:text', async (ctx) => {
     const telegramId = String(ctx.from?.id);
     const text = ctx.message.text;
-    
-    // Ignorar comandos (já devem ter sido capturados pelos handlers anteriores)
+
+    // Commands should have been handled above — ignore leftovers
     if (text.startsWith('/')) return;
 
-    const session = await auth.getSession(telegramId);
+    const session = (ctx as any).session ?? (await auth.getSession(telegramId));
 
     if (!session?.isOnboarded) {
       return ctx.reply('Please complete onboarding first: /start');
@@ -357,17 +369,16 @@ export function setupHandlers(bot: Bot<Context>) {
         `- Risk profile: ${session.riskProfile || 'not set'}\n` +
         `- Allowed tokens: ${session.allowedTokens?.join(', ') || 'not set'}\n` +
         `- Contract wallet: ${contractAddress ?? 'not deployed'}\n` +
-        `- Daily limit remaining: ${limits ? Number(limits.remainingToday) / 1_000_000 : '?'} STX\n` +
-        `- Current positions: ${
-          positions.length > 0
-            ? (positions as any[]).map((p: any) => `${p.protocol}: ${p.amount} ${p.token}`).join(', ')
-            : 'none'
+        `- Daily limit remaining: ${limits ? Number(limits.remainingToday) / STX_DECIMALS : '?'} STX\n` +
+        `- Current positions: ${positions.length > 0
+          ? (positions as any[]).map((p: any) => `${p.protocol}: ${p.amount} ${p.token}`).join(', ')
+          : 'none'
         }\n\n` +
         `User message: ${text}`;
 
       const { response, toolCalls } = await claudeAgent.sendMessage(
         [{ role: 'user', content: contextMessage }],
-        agentTools
+        agentTools,
       );
 
       if (toolCalls.length > 0) {
@@ -384,7 +395,7 @@ export function setupHandlers(bot: Bot<Context>) {
               toolResult = JSON.stringify(positions);
               break;
             case 'get_balance': {
-              const addr = contractAddress ?? toolCall.input.address as string;
+              const addr = contractAddress ?? (toolCall.input.address as string);
               const balance = await mcpClient.getStacksBalance(addr);
               toolResult = JSON.stringify(balance);
               break;
@@ -394,7 +405,6 @@ export function setupHandlers(bot: Bot<Context>) {
                 await ctx.reply('❌ Please complete wallet setup first using /start');
                 return;
               }
-              
               const kb = new InlineKeyboard()
                 .text('✅ Confirm', `confirm_deposit_${toolCall.input.protocol}_${toolCall.input.amount}`)
                 .text('❌ Cancel', 'cancel_action');
@@ -404,7 +414,7 @@ export function setupHandlers(bot: Bot<Context>) {
                 `Token: ${toolCall.input.token}\n` +
                 `Amount: ${toolCall.input.amount}\n\n` +
                 `This will be executed via your contract wallet.`,
-                { parse_mode: 'Markdown', reply_markup: kb }
+                { parse_mode: 'Markdown', reply_markup: kb },
               );
               return;
             }
@@ -413,7 +423,6 @@ export function setupHandlers(bot: Bot<Context>) {
                 await ctx.reply('❌ Please complete wallet setup first using /start');
                 return;
               }
-              
               const kb = new InlineKeyboard()
                 .text('✅ Confirm', `confirm_withdraw_${toolCall.input.protocol}_${toolCall.input.amount}`)
                 .text('❌ Cancel', 'cancel_action');
@@ -422,7 +431,7 @@ export function setupHandlers(bot: Bot<Context>) {
                 `Protocol: ${toolCall.input.protocol}\n` +
                 `Token: ${toolCall.input.token}\n` +
                 `Amount: ${toolCall.input.amount}`,
-                { parse_mode: 'Markdown', reply_markup: kb }
+                { parse_mode: 'Markdown', reply_markup: kb },
               );
               return;
             }
@@ -449,10 +458,10 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  logger.info('Bot handlers configured (Modelo C - corrigido)');
+  logger.info('Bot handlers configured successfully');
 }
 
-// Re-export das funções de wallet
+// Re-export wallet helpers
 export {
   createWalletConnectKeyboard,
   sendWalletConnectionPrompt,

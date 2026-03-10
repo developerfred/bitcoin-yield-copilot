@@ -1,7 +1,7 @@
 import { Context, NextFunction, MiddlewareFn } from 'grammy';
-import { createLogger } from 'pino';
+import pino from 'pino';
 
-const logger = createLogger({ name: 'bot:middleware:rate-limit' });
+const logger = pino({ name: 'bot:middleware:rate-limit' });
 
 interface RateLimitConfig {
   windowMs: number;

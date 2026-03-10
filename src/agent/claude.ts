@@ -1,31 +1,31 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, ToolUseBlock as SDKToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
 import { config } from '../config.js';
-import { createLogger } from 'pino';
+import pino from 'pino';
 
-const logger = createLogger({ name: 'agent:claude' });
+const logger = pino({ name: 'agent:claude' });
 
 export interface Tool {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
 }
 
-export interface Message {
-  role: 'user' | 'assistant' | 'tool';
-  content: string | ToolUseBlock;
-}
+// Messages the caller sends IN to sendMessage()
+export type IncomingMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string }
+  | { role: 'tool_result'; tool_use_id: string; content: string };
 
 export interface ToolUseBlock {
   type: 'tool_use';
   id: string;
   name: string;
   input: Record<string, unknown>;
-}
-
-export interface ToolResultBlock {
-  type: 'tool_result';
-  tool_use_id: string;
-  content: string;
 }
 
 export class ClaudeAgent {
@@ -35,12 +35,12 @@ export class ClaudeAgent {
 
   constructor() {
     this.client = new Anthropic({
-      apiKey: config.anthropic.apiKey,
+      apiKey: config.llm.anthropicApiKey,
     });
   }
 
   async sendMessage(
-    messages: Message[],
+    messages: IncomingMessage[],
     tools: Tool[] = [],
     systemPrompt?: string
   ): Promise<{ response: string; toolCalls: ToolUseBlock[] }> {
@@ -52,77 +52,71 @@ export class ClaudeAgent {
       input_schema: t.input_schema,
     }));
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system,
-      tools: toolDefs.length > 0 ? toolDefs : undefined,
-      messages: messages as any,
+    // Convert our IncomingMessage[] → Anthropic SDK MessageParam[]
+    const sdkMessages: MessageParam[] = messages.map((m) => {
+      if (m.role === 'tool_result') {
+        // Tool results go as role "user" with a tool_result content block
+        return {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: m.tool_use_id,
+              content: m.content, // must be string here
+            },
+          ],
+        };
+      }
+
+      // Normal user or assistant message
+      return {
+        role: m.role,
+        content: m.content,
+      };
     });
 
-    const toolCalls: ToolUseBlock[] = [];
-    let responseText = '';
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system,
+        messages: sdkMessages,
+        tools: toolDefs.length > 0 ? toolDefs : undefined,
+      });
 
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        responseText += block.text;
-      } else if (block.type === 'tool_use') {
-        toolCalls.push({
+      const textBlock = response.content.find((c) => c.type === 'text');
+      const toolUseBlocks = response.content.filter(
+        (c): c is SDKToolUseBlock => c.type === 'tool_use'
+      );
+
+      return {
+        response: textBlock?.type === 'text' ? textBlock.text : '',
+        toolCalls: toolUseBlocks.map((t) => ({
           type: 'tool_use',
-          id: block.id,
-          name: block.name,
-          input: block.input,
-        });
-      }
+          id: t.id,
+          name: t.name,
+          input: t.input as Record<string, unknown>,
+        })),
+      };
+    } catch (error) {
+      logger.error({ error }, 'Failed to send message to Claude');
+      throw error;
     }
-
-    logger.debug({ toolCalls: toolCalls.length, responseLength: responseText.length }, 'Claude response');
-
-    return { response: responseText, toolCalls };
   }
 
   private getDefaultSystemPrompt(): string {
-    return `You are Bitcoin Yield Copilot, an autonomous AI agent that helps users manage their Bitcoin yield in the Stacks ecosystem.
+    return `You are a helpful Bitcoin Yield Copilot assistant. You help users manage their Bitcoin yield in the Stacks ecosystem.
 
 Your capabilities:
-- Query real-time APYs from DeFi protocols (Zest, ALEX, Hermetica, Bitflow)
-- Execute deposits and withdrawals to/from yield protocols
-- Monitor portfolio positions and PnL
-- Provide personalized recommendations based on user risk profile
+- Check yield opportunities across DeFi protocols
+- View portfolio positions
+- Prepare deposit and withdraw transactions
+- Check wallet balances
 
-User interaction style:
-- Be helpful, concise, and friendly
-- Always explain your reasoning
+Always:
+- Be concise and clear
 - Ask for confirmation before executing transactions
-- Provide transaction receipts with explorer links
-
-Safety rules:
-- Never execute transactions without explicit user confirmation
-- Always show the estimated gas cost before executing
-- Warn users about potential risks
-- Never share private keys or sensitive information`;
-  }
-
-  async getYieldRecommendations(
-    userRiskProfile: 'conservative' | 'moderate' | 'aggressive',
-    availableTokens: string[]
-  ): Promise<string> {
-    const riskGuidance = {
-      conservative: 'Focus on stable, established protocols with lower APY but proven track record.',
-      moderate: 'Balance between established protocols and higher-yield opportunities.',
-      aggressive: 'Consider higher-yield protocols, even with higher risk. Include LP positions.',
-    };
-
-    const messages: Message[] = [
-      {
-        role: 'user',
-        content: `Based on a ${userRiskProfile} risk profile and available tokens [${availableTokens.join(', ')}], what yield opportunities would you recommend? ${riskGuidance[userRiskProfile]}`,
-      },
-    ];
-
-    const { response } = await this.sendMessage(messages);
-    return response;
+- Explain risks when relevant
+- Use the user's preferred language`;
   }
 }
-
-export const claudeAgent = new ClaudeAgent();

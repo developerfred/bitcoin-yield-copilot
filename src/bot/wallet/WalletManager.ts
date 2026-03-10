@@ -927,15 +927,15 @@ class ContractService {
   ): Promise<string> {
     const [contractAddr, contractName] = contractAddress.split('.');
 
-    const validProtocols = protocols.filter(p => p.address && p.address.length > 10);
+    //const validProtocols = protocols.filter(p => p.address && p.address.length > 10);
     
-    const protocolsList = listCV(validProtocols.map(p =>
+    /*const protocolsList = listCV(validProtocols.map(p =>
       tupleCV({
         address: principalCV(p.address),
         name: stringAsciiCV(p.name),
         'max-alloc': uintCV(p.maxAlloc),
       }),
-    ));
+    ));*/
 
     const result = await this.callContractFunction(
       contractAddr,
@@ -945,8 +945,7 @@ class ContractService {
         bufferCV(telegramHash),
         bufferCV(botPublicKey),
         uintCV(limits.maxPerTransaction),
-        uintCV(limits.dailyLimit),
-        protocolsList,
+        uintCV(limits.dailyLimit)        
       ]
     );
 
@@ -1463,6 +1462,84 @@ async debugListWallets(): Promise<void> {
     }
   }
 
+  private async registerProtocols(
+    contractAddress: string,
+    telegramHash: Buffer,
+    protocols: ProtocolConfig[],
+  ): Promise<void> {
+    console.log(`[registerProtocols] Registering ${protocols.length} protocols...`);
+
+    for (const protocol of protocols) {
+      // Tentar até 3 vezes por protocolo
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const nonce = await this.contractService.readWalletNonce(contractAddress);
+          const currentBlock = await this.blockchainService.fetchCurrentBlock();
+          const expiryBlock = currentBlock + 10;
+
+          // Construir payload conforme o contrato add-protocol
+          const protocolHash = this.cryptoService.hashPrincipalData(protocol.address);
+
+          const payload = Buffer.concat([
+            telegramHash,
+            uint128BE(BigInt(50)), // DOMAIN-ADD-PROTOCOL = u50
+            protocolHash,           // sha256 do principal do protocolo
+            uint128BE(nonce),
+            uint128BE(protocol.maxAlloc),
+            uint128BE(BigInt(expiryBlock)),
+          ]);
+
+          const msgHash = createHash('sha256').update(payload).digest();
+          const signature = this.cryptoService.createFullSignature(msgHash);
+
+          const [addr, name] = contractAddress.split('.');
+
+          await this.contractService.callContractFunction(
+            addr,
+            name,
+            'add-protocol',
+            [
+              principalCV(protocol.address),
+              stringAsciiCV(protocol.name),
+              uintCV(protocol.maxAlloc),
+              uintCV(nonce),
+              uintCV(BigInt(expiryBlock)),
+              bufferCV(signature),
+              bufferCV(telegramHash),
+            ]
+          );
+
+          console.log(`[registerProtocols] ✅ ${protocol.name} registered (${protocol.address})`);
+
+          // Aguardar entre protocolos para não conflitar nonces
+          await new Promise(resolve => setTimeout(resolve, 6000));
+          break;
+
+        } catch (error: any) {
+          const isAlreadyRegistered =
+            error.message?.includes('412') ||
+            error.message?.includes('ERR-PROTOCOL-EXISTS');
+
+          if (isAlreadyRegistered) {
+            console.log(`[registerProtocols] ${protocol.name} already registered, skipping.`);
+            break;
+          }
+
+          console.error(`[registerProtocols] Error registering ${protocol.name} (attempt ${attempt}/3):`, error.message);
+
+          if (attempt === 3) {
+            // Não lança erro — wallet ainda funciona sem o protocolo
+            console.warn(`[registerProtocols] ⚠️ Failed to register ${protocol.name} after 3 attempts. Continuing...`);
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+        }
+      }
+    }
+
+    console.log(`[registerProtocols] Protocol registration complete.`);
+  }
+
   /**
    * Verifica e inicializa o withdraw-helper se necessário
    */
@@ -1529,8 +1606,7 @@ async debugListWallets(): Promise<void> {
       record.contractAddress,
       telegramHash,
       this.botPublicKey,
-      limits,
-      protocols
+      limits      
     );
   }
 
@@ -1639,6 +1715,9 @@ async createContractWallet(
           protocols
         );
         console.log(`[createContractWallet] Contract initialized successfully (attempt ${attempt}/3).`);
+        await new Promise(resolve => setTimeout(resolve, 8000));
+        await this.registerProtocols(contractAddress, telegramHash, protocols);
+        
         break;
       } catch (initError: any) {
         console.error(`[createContractWallet] Initialization error (attempt ${attempt}/3):`, initError);
@@ -1793,174 +1872,136 @@ async createContractWallet(
   }
 
   async withdrawStx(
-  telegramUserId: string,
-  recipientAddress: string,
-  amountMicro: bigint,
-  expiryBlocks: number = 10
-): Promise<{ txIdAuth: string; txIdWithdraw: string }> {
-  const record = this.getCachedWallet(telegramUserId);
-  if (!record) throw new Error('Wallet not found for user');
-  if (!record.isActive) throw new Error('Wallet is inactive');
+    telegramUserId: string,
+    recipientAddress: string,
+    amountMicro: bigint,
+    expiryBlocks: number = 10
+  ): Promise<{ txIdAuth: string; txIdWithdraw: string }> {
+    const record = this.getCachedWallet(telegramUserId);
+    if (!record) throw new Error('Wallet not found for user');
+    if (!record.isActive) throw new Error('Wallet is inactive');
 
-  if (!validateStacksAddress(recipientAddress)) {
-    throw new Error('Invalid recipient address');
+    if (!validateStacksAddress(recipientAddress)) {
+      throw new Error('Invalid recipient address');
+    }
+
+    const isPubKeyValid = await this.verifyBotPublicKey();
+    if (!isPubKeyValid) {
+      throw new Error('Bot public key mismatch with contract');
+    }
+
+    const telegramHash = this.cryptoService.deriveTelegramHash(telegramUserId, this.salt);
+    const walletContract = record.contractAddress;
+
+    const currentBlock = await this.blockchainService.fetchCurrentBlock();
+    const expiry = currentBlock + expiryBlocks;
+
+    // Nonce vem do HELPER (não da user-wallet)
+    const helperNonce = await this.contractService.readHelperNonce(walletContract);
+
+    console.log(`[withdrawStx] wallet: ${walletContract}`);
+    console.log(`[withdrawStx] recipient: ${recipientAddress}`);
+    console.log(`[withdrawStx] amount: ${amountMicro}`);
+    console.log(`[withdrawStx] helperNonce: ${helperNonce}`);
+    console.log(`[withdrawStx] expiry: ${expiry}`);
+
+    // CORREÇÃO: usar serializeCV para replicar to-consensus-buff? do Clarity
+    const { serializeCV } = await import('@stacks/transactions');
+
+    const walletHash = createHash('sha256')
+      .update(serializeCV(principalCV(walletContract)))
+      .digest();
+
+    const recipientHash = createHash('sha256')
+      .update(serializeCV(principalCV(recipientAddress)))
+      .digest();
+
+    console.log(`[withdrawStx] walletHash: ${walletHash.toString('hex')}`);
+    console.log(`[withdrawStx] recipientHash: ${recipientHash.toString('hex')}`);
+
+    // Construir payload idêntico ao contrato:
+    // (withdraw-payload tg-hash wallet-hash nonce amount expiry recip-hash)
+    const helperPayload = Buffer.concat([
+      telegramHash,                        // 32 bytes - tg-hash
+      uint128BE(BigInt(10)),               // 16 bytes - DOMAIN-WITHDRAW = u10
+      walletHash,                          // 32 bytes - wallet-hash
+      uint128BE(helperNonce),              // 16 bytes - nonce
+      uint128BE(amountMicro),              // 16 bytes - amount
+      uint128BE(BigInt(expiry)),           // 16 bytes - expiry
+      recipientHash,                       // 32 bytes - recip-hash
+    ]);
+
+    const helperMsgHash = createHash('sha256').update(helperPayload).digest();
+    console.log(`[withdrawStx] helperMsgHash: ${helperMsgHash.toString('hex')}`);
+
+    const helperSig = this.cryptoService.createFullSignature(helperMsgHash);
+
+    // Step 1: authorize-withdrawal no helper
+    console.log('[withdrawStx] Calling authorize-withdrawal...');
+    const [helperAddr, helperName] = this.withdrawHelperContract.split('.');
+
+    const authResult = await this.contractService.callContractFunction(
+      helperAddr,
+      helperName,
+      'authorize-withdrawal',
+      [
+        principalCV(walletContract),      // wallet
+        uintCV(helperNonce),              // nonce
+        uintCV(amountMicro),              // amount
+        principalCV(recipientAddress),    // recipient
+        uintCV(BigInt(expiry)),           // expiry-block
+        bufferCV(telegramHash),           // tg-proof
+        bufferCV(helperSig),              // bot-sig
+      ]
+    );
+
+    console.log(`[withdrawStx] Auth TX: ${authResult.txid}`);
+    await this.blockchainService.waitForConfirmation(authResult.txid);
+
+    // Calcular auth-key — mesmo cálculo do contrato:
+    // (auth-key wallet nonce) = sha256(to-consensus-buff?(wallet) ++ uint-to-16bytes(nonce))
+    const authKey = createHash('sha256')
+      .update(Buffer.concat([
+        serializeCV(principalCV(walletContract)),
+        uint128BE(helperNonce),
+      ]))
+      .digest();
+
+    console.log(`[withdrawStx] authKey: ${authKey.toString('hex')}`);
+
+    // Aguardar propagação
+    await new Promise(r => setTimeout(r, 5000));
+
+    // Step 2: withdraw-stx na user-wallet
+    // Assinatura: (amount uint) (recipient principal) (expiry-block uint) (auth-key (buff 32))
+    console.log('[withdrawStx] Calling withdraw-stx...');
+    const [walletAddr, walletName] = walletContract.split('.');
+
+    const withdrawResult = await this.contractService.callContractFunction(
+      walletAddr,
+      walletName,
+      'withdraw-stx',
+      [
+        uintCV(amountMicro),              // amount
+        principalCV(recipientAddress),    // recipient
+        uintCV(BigInt(expiry)),           // expiry-block
+        bufferCV(authKey),                // auth-key
+      ]
+    );
+
+    console.log(`[withdrawStx] Withdraw TX: ${withdrawResult.txid}`);
+
+    this.databaseService.logOperation(
+      telegramHash.toString('hex'),
+      walletContract,
+      withdrawResult.txid,
+      this.withdrawHelperContract,
+      'withdraw-stx',
+      amountMicro
+    );
+
+    return { txIdAuth: authResult.txid, txIdWithdraw: withdrawResult.txid };
   }
-
-  const isPubKeyValid = await this.verifyBotPublicKey();
-  if (!isPubKeyValid) {
-    throw new Error('Bot public key mismatch with contract');
-  }
-
-  const telegramHash = this.cryptoService.deriveTelegramHash(telegramUserId, this.salt);
-  const walletContract = record.contractAddress;
-  
-  const currentBlock = await this.blockchainService.fetchCurrentBlock();
-  const expiry = currentBlock + expiryBlocks;
-
-  console.log(`[withdrawStx] Starting withdrawal for ${telegramUserId}`);
-  console.log(`  Wallet: ${walletContract}`);
-  console.log(`  Recipient: ${recipientAddress}`);
-  console.log(`  Amount: ${amountMicro} microSTX`);
-  console.log(`  Current block: ${currentBlock}, Expiry: ${expiry}`);
-
-  // Get current nonce from helper contract
-  const helperNonce = await this.contractService.readHelperNonce(walletContract);
-  console.log(`  Helper nonce: ${helperNonce}`);
-
-  // CORREÇÃO 1: Calcular wallet hash removendo o byte de tipo
-  const walletHash = this.calculateWalletHash(walletContract);
-  
-  // CORREÇÃO 2: Calcular recipient hash removendo o byte de tipo
-  const recipientHash = this.calculateRecipientHash(recipientAddress);
-  
-  console.log(`  walletHash: ${walletHash.toString('hex')}`);
-  console.log(`  recipientHash: ${recipientHash.toString('hex')}`);
-
-  // CORREÇÃO 3: Construir payload do helper com DOMAIN-WITHDRAW
-  const helperPayload = this.buildHelperWithdrawPayload(
-    telegramHash,
-    walletHash,
-    helperNonce,
-    amountMicro,
-    BigInt(expiry),
-    recipientHash
-  );
-
-  console.log(`  Helper payload length: ${helperPayload.length} bytes`);
-  console.log(`  Helper payload: ${helperPayload.toString('hex')}`);
-
-  const helperMsgHash = createHash('sha256').update(helperPayload).digest();
-  console.log(`  Helper msg hash: ${helperMsgHash.toString('hex')}`);
-
-  // Verificar com o contrato
-  await this.verifyHelperPayload(
-    walletContract,
-    helperNonce,
-    amountMicro,
-    expiry,
-    telegramHash,
-    recipientAddress,
-    helperMsgHash
-  );
-
-  // Assinar
-  const helperSig = this.cryptoService.createFullSignature(helperMsgHash);
-
-  // Chamar authorize-withdrawal
-  console.log('\n=== ENVIANDO AUTHORIZE-WITHDRAWAL ===');
-  
-  const [helperAddr, helperName] = this.withdrawHelperContract.split('.');
-  
-  const authArgs = [
-    principalCV(walletContract),        // wallet: principal
-    uintCV(helperNonce),                // nonce: uint
-    uintCV(amountMicro),                 // amount: uint
-    principalCV(recipientAddress),       // recipient: principal
-    uintCV(BigInt(expiry)),              // expiry-block: uint
-    bufferCV(telegramHash),              // tg-proof: buff 32
-    bufferCV(helperSig)                   // bot-sig: buff 65
-  ];
-
-  const authResult = await this.contractService.callContractFunction(
-    helperAddr,
-    helperName,
-    'authorize-withdrawal',
-    authArgs
-  );
-
-  console.log(`  Authorization TX: ${authResult.txid}`);
-  await this.blockchainService.waitForConfirmation(authResult.txid);
-
-  // AGUARDAR para garantir que a autorização foi processada
-  console.log('\n=== AGUARDANDO 5 SEGUNDOS ===');
-  await new Promise(r => setTimeout(r, 5000));
-
-  // Agora fazer o withdrawal da user wallet
-  console.log('\n=== PREPARANDO WITHDRAWAL DA USER WALLET ===');
-  
-  const walletNonce = await this.contractService.readWalletNonce(walletContract);
-  const newExpiry = (await this.blockchainService.fetchCurrentBlock()) + expiryBlocks;
-
-  console.log(`  Wallet nonce: ${walletNonce}`);
-  console.log(`  New expiry: ${newExpiry}`);
-
-  // CORREÇÃO 4: Construir payload da user wallet com DOMAIN-WITHDRAW
-  const userPayload = this.buildUserWithdrawPayload(
-    telegramHash,
-    walletNonce,
-    amountMicro,
-    BigInt(newExpiry),
-    recipientHash
-  );
-
-  console.log(`  User payload length: ${userPayload.length} bytes`);
-  console.log(`  User payload: ${userPayload.toString('hex')}`);
-
-  const userMsgHash = createHash('sha256').update(userPayload).digest();
-  console.log(`  User msg hash: ${userMsgHash.toString('hex')}`);
-
-  const userSig = this.cryptoService.createFullSignature(userMsgHash);
-
-  const [walletAddr, walletName] = walletContract.split('.');
-  
-  const withdrawArgs = [
-    uintCV(helperNonce),                 // helper-nonce: uint (NÃO é o wallet nonce!)
-    uintCV(amountMicro),                   // amount: uint
-    principalCV(recipientAddress),         // recipient: principal
-    uintCV(BigInt(newExpiry)),             // expiry-block: uint
-    bufferCV(telegramHash),                 // auth-key: buff 32 (é o telegramHash? Verificar)
-    bufferCV(userSig)                       // bot-sig: buff 65
-  ];
-
-  // NOTA: O contrato user-wallet espera:
-  // (define-public (withdraw-stx (helper-nonce uint) (amount uint) (recipient principal) (expiry-block uint) (auth-key (buff 32)) (bot-sig (buff 65)))
-
-  console.log('\n=== ENVIANDO WITHDRAW-STX ===');
-  
-  const withdrawResult = await this.contractService.callContractFunction(
-    walletAddr,
-    walletName,
-    'withdraw-stx',
-    withdrawArgs
-  );
-
-  console.log(`  Withdrawal TX: ${withdrawResult.txid}`);
-
-  this.databaseService.logOperation(
-    telegramHash.toString('hex'),
-    walletContract,
-    withdrawResult.txid,
-    this.withdrawHelperContract,
-    'withdraw-stx',
-    amountMicro
-  );
-
-  console.log('\n=== ✅ WITHDRAWAL COMPLETED SUCCESSFULLY ===');
-  console.log(`  Auth TX: ${authResult.txid}`);
-  console.log(`  Withdraw TX: ${withdrawResult.txid}`);
-
-  return { txIdAuth: authResult.txid, txIdWithdraw: withdrawResult.txid };
-}
 
 // Métodos auxiliares
 private calculateWalletHash(principal: string): Buffer {

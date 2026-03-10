@@ -1,12 +1,12 @@
 import 'dotenv/config';
 import { Bot } from 'grammy';
-import { createLogger } from 'pino';
+import pino from 'pino';
 import { config } from './config.js';
 import { setupHandlers } from './bot/handlers/index.js';
 import { errorHandlingMiddleware, loggingMiddleware } from './bot/middleware/error.js';
 import { rateLimitMiddleware } from './bot/middleware/rate-limit.js';
 
-const logger = createLogger({
+const logger = pino({
   level: config.log.level,
   name: 'bitcoin-yield-copilot',
 });
@@ -22,6 +22,8 @@ async function main() {
   bot.use(errorHandlingMiddleware);
 
   setupHandlers(bot);
+
+  await bot.init();
 
   logger.info(`Bot username: ${bot.botInfo.username}`);
 

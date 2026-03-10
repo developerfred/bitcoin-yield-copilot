@@ -1,0 +1,78 @@
+[project]
+name = "bitcoin_yield_copilot"
+description = "Autonomous Telegram agent that manages Bitcoin yield in the Stacks ecosystem with natural language interface, ERC-8004 onchain identity, and x402 payments in sBTC."
+authors = ["codingsh"]
+telemetry = true
+cache_dir = ".clarinet"
+
+[contracts.wallet-factory]
+path = "contracts/wallet-factory.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.adapter-trait]
+path = "contracts/adapter-trait.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.adapter-trait-v2]
+path = "contracts/adapter-trait-v2.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.withdraw-helper]
+path = "contracts/withdraw-helper.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.proxy-registry]
+path = "contracts/proxy-registry.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.proxy-adapter]
+path = "contracts/proxy-adapter.clar"
+depends_on = ["adapter-trait", "proxy-registry"]
+clarity_version = 3
+epoch = 3.1
+
+[contracts.user-wallet]
+path = "contracts/user-wallet.clar"
+depends_on = ["adapter-trait", "adapter-trait-v2", "withdraw-helper", "wallet-factory", "proxy-adapter"]
+clarity_version = 3
+epoch = 3.1
+
+[contracts.adapter-alex-v1]
+path = "contracts/adapter-alex-v1.clar"
+depends_on = ["adapter-trait", "wallet-factory"]
+clarity_version = 3
+epoch = 3.1
+
+[contracts.mock-sip-010]
+path = "contracts/mocks/mock-sip-010.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.mock-alex-swap-helper]
+path = "contracts/mocks/mock-alex-swap-helper.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.mock-alex-fixed-pool]
+path = "contracts/mocks/mock-alex-fixed-pool.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.mock-alex-vault]
+path = "contracts/mocks/mock-alex-vault.clar"
+clarity_version = 3
+epoch = 3.1
+
+[repl.settings]
+analysis = ["check_checker", "costs"]
+passes = ["check_checker", "costs"]
+check_checker = { trusted_sender = false, trusted_caller = false, callee_filter = false }
+
+[repl.testnet]
+node_url = "https://stacks-node-api.testnet.alexlab.co/"
+explorer_url = "https://explorer.testnet.alexlab.co/"
