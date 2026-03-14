@@ -31,6 +31,7 @@ import { getDatabase } from '../../agent/database.js';
 import { AuthMiddleware } from '../middleware/auth.js';
 import { mcpClient } from '../../mcp/client.js';
 import { ClaudeAgent, Tool, IncomingMessage } from '../../agent/claude.js';
+import { createAgent } from '../../agent/factory.js';
 import { getWalletManager } from '../wallet/WalletManager.js';
 import { registerOnboardingHandlers } from './onboarding.js';
 import { registerAlexHandlers } from './alex.js';
@@ -125,7 +126,7 @@ export function setupHandlers(bot: Bot<Context>) {
 
   const db = getDatabase();
   const auth = new AuthMiddleware(db);
-  const claudeAgent = new ClaudeAgent();
+  const agent = createAgent();
 
   // --------------------------------------------------------------------------
   // STEP 1 — Global middleware (always runs first, always calls next())
@@ -414,7 +415,7 @@ export function setupHandlers(bot: Bot<Context>) {
         }\n\n` +
         `User message: ${text}`;
 
-      const { response, toolCalls } = await claudeAgent.sendMessage(
+      const { response, toolCalls } = await agent.sendMessage(
         [{ role: 'user', content: contextMessage }],
         agentTools,
       );
@@ -483,7 +484,7 @@ export function setupHandlers(bot: Bot<Context>) {
             { role: 'tool_result', tool_use_id: toolCall.id, content: toolResult },
           ];
 
-          const continueResponse = await claudeAgent.sendMessage(continueMessages, agentTools);
+          const continueResponse = await agent.sendMessage(continueMessages, agentTools);
           await ctx.reply(continueResponse.response);
           return;
         }

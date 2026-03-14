@@ -14,8 +14,6 @@
 ;; CONSTANTS
 ;; ============================================
 
-(define-constant CONTRACT-OWNER tx-sender)
-
 (define-constant ERR-INVALID-AMOUNT (err u400))
 (define-constant ERR-IMPL-NOT-FOUND (err u410))
 (define-constant ERR-IMPL-MISMATCH  (err u411))
@@ -57,7 +55,7 @@
 ;; adapter-trait-v2: execute-via with principal argument.
 ;; Used when the caller cannot pass a typed trait (e.g. internal cross-contract calls).
 ;; Registry check still enforced - no unregistered impl can be injected.
-(define-public (execute-via-principal
+(define-read-only (execute-via-principal
     (impl principal)
     (amount uint)
     (action (string-ascii 16)))
@@ -79,7 +77,7 @@
 
 ;; adapter-trait compatibility shim - direct calls are blocked.
 ;; Always use execute-via with the current implementation as argument.
-(define-public (execute (amount uint) (action (string-ascii 16)))
+(define-read-only (execute (amount uint) (action (string-ascii 16)))
   ERR-IMPL-NOT-FOUND
 )
 

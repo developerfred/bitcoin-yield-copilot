@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="ngrok-skip-browser-warning" content="true" />
+  <title>Connect Wallet · Bitcoin Yield Copilot</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <script>
+    (function() {
+      const originalFetch = window.fetch;
+      window.fetch = function(input, init = {}) {
+        const headers = new Headers(init.headers || {});
+        headers.set('ngrok-skip-browser-warning', 'true');
+        return originalFetch(input, { ...init, headers });
+      };
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Cabinet+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --btc:       #F7931A;
+      --btc-soft:  rgba(247,147,26,0.12);
+      --btc-glow:  rgba(247,147,26,0.28);
+      --bg:        #080808;
+      --panel:     #111111;
+      --panel2:    #191919;
+      --line:      rgba(255,255,255,0.07);
+      --txt:       #EDEBE7;
+      --mute:      #575250;
+      --green:     #3DBA7E;
+      --red:       #E05252;
+      --blue:      #6C8EF5;
+      --purple:    #C47ED4;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--txt);
+      font-family: 'Cabinet Grotesk', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.022'/%3E%3C/svg%3E");
+      background-size: 200px;
+    }
+
+    body::after {
+      content: '';
+      position: fixed; z-index: 0; pointer-events: none;
+      width: 480px; height: 480px;
+      top: -180px; left: 50%; transform: translateX(-50%);
+      background: radial-gradient(circle, rgba(247,147,26,0.065) 0%, transparent 70%);
+      animation: breathe 7s ease-in-out infinite alternate;
+    }
+
+    @keyframes breathe {
+      0%   { opacity: 0.5; transform: translateX(-50%) scale(1); }
+      100% { opacity: 1;   transform: translateX(-50%) scale(1.18); }
+    }
+
+    .shell {
+      position: relative; z-index: 2;
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      padding: 18px 16px 40px;
+      max-width: 400px; margin: 0 auto;
+      gap: 0;
+    }
+
+    @keyframes drop {
+      from { opacity:0; transform:translateY(-10px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes rise {
+      from { opacity:0; transform:translateY(13px);  }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes pop {
+      from { opacity:0; transform:scale(0.93);        }
+      to   { opacity:1; transform:scale(1); }
+    }
+    @keyframes rot {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes dotpulse {
+      0%,80%,100% { opacity: 0.3; transform: scale(0.8); }
+      40%         { opacity: 1;   transform: scale(1.1); }
+    }
+
+    .topbar {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 20px;
+      animation: drop 0.4s cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    .logo {
+      width: 36px; height: 36px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--btc), #c97614);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px;
+      box-shadow: 0 0 16px var(--btc-glow);
+    }
+
+    .app-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
+    .app-sub   { font-size: 10px; color: var(--mute); font-family: 'DM Mono', monospace; margin-top: 1px; }
+
+    .net-row { display: flex; gap: 4px; margin-left: auto; }
+
+    .net-chip {
+      padding: 3px 8px; border-radius: 100px;
+      font-size: 10px; font-family: 'DM Mono', monospace;
+      border: 1px solid transparent; cursor: pointer;
+      transition: all 0.2s; color: var(--mute);
+      background: var(--panel2); user-select: none;
+    }
+
+    .net-chip[data-net="mainnet"].active { color: var(--btc);    border-color: var(--btc);    background: var(--btc-soft); }
+    .net-chip[data-net="testnet"].active { color: var(--blue);   border-color: var(--blue);   background: rgba(108,142,245,0.1); }
+    .net-chip[data-net="devnet"].active  { color: var(--purple); border-color: var(--purple); background: rgba(196,126,212,0.1); }
+
+    .net-banner {
+      padding: 9px 12px; border-radius: 10px;
+      font-size: 11px; font-family: 'DM Mono', monospace;
+      margin-bottom: 16px; border: 1px solid;
+      display: flex; align-items: flex-start; gap: 7px;
+      animation: rise 0.4s 0.04s cubic-bezier(0.22,1,0.36,1) both;
+      line-height: 1.45;
+    }
+
+    .net-banner.mainnet { background: rgba(247,147,26,0.05);  border-color: rgba(247,147,26,0.18);  color: rgba(247,147,26,0.82); }
+    .net-banner.testnet { background: rgba(108,142,245,0.05); border-color: rgba(108,142,245,0.2);  color: rgba(108,142,245,0.88); }
+    .net-banner.devnet  { background: rgba(196,126,212,0.05); border-color: rgba(196,126,212,0.2);  color: rgba(196,126,212,0.88); }
+
+    .section-label {
+      font-size: 10px; font-family: 'DM Mono', monospace;
+      color: var(--mute); letter-spacing: 1.4px; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .env-hint {
+      background: rgba(108,142,245,0.07);
+      border: 1px solid rgba(108,142,245,0.18);
+      border-radius: 10px; padding: 12px;
+      font-size: 11px; font-family: 'DM Mono', monospace;
+      margin-bottom: 14px;
+      display: none;
+      animation: rise 0.3s both;
+      line-height: 1.6;
+    }
+    .env-hint.show { display: block; }
+    .env-hint.telegram-mode {
+      background: rgba(247,147,26,0.1);
+      border-color: var(--btc);
+      color: var(--btc);
+    }
+    .env-hint.browser-mode {
+      background: rgba(61,186,126,0.1);
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .wallet-opt {
+      width: 100%;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 14px; padding: 14px 16px;
+      display: flex; align-items: center; gap: 13px;
+      cursor: pointer; position: relative; overflow: hidden;
+      transition: border-color 0.2s, transform 0.15s;
+      margin-bottom: 8px; text-align: left;
+      animation: rise 0.42s cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    .wallet-opt.recommended {
+      border-color: var(--btc);
+      box-shadow: 0 0 15px var(--btc-glow);
+    }
+
+    .wallet-opt::before {
+      content: ''; position: absolute; inset: 0;
+      opacity: 0; transition: opacity 0.2s;
+    }
+
+    .wallet-opt.xverse::before  { background: linear-gradient(120deg, rgba(108,142,245,0.1), transparent 60%); }
+    .wallet-opt.leather::before { background: linear-gradient(120deg, var(--btc-soft), transparent 60%); }
+    .wallet-opt.wc::before      { background: linear-gradient(120deg, rgba(61,186,126,0.08), transparent 60%); }
+    .wallet-opt.browser::before { background: linear-gradient(120deg, rgba(247,147,26,0.1), transparent 60%); }
+
+    .wallet-opt:hover { border-color: rgba(255,255,255,0.13); transform: translateY(-1px); }
+    .wallet-opt:hover::before { opacity: 1; }
+    .wallet-opt:active { transform: none; }
+    .wallet-opt:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .opt-icon {
+      width: 42px; height: 42px; flex-shrink: 0; border-radius: 11px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; position: relative; z-index: 1;
+    }
+
+    .opt-icon.xverse  { background: linear-gradient(135deg, #1a1a3e, #2a2a6e); border: 1px solid rgba(108,142,245,0.25); }
+    .opt-icon.leather { background: #1c1c1c; border: 1px solid #2a2a2a; }
+    .opt-icon.wc      { background: #0f1e2e; border: 1px solid rgba(61,186,126,0.2); }
+    .opt-icon.browser { background: #2a2a2a; border: 1px solid var(--btc); }
+
+    .opt-info { flex: 1; position: relative; z-index: 1; }
+    .opt-name { font-size: 15px; font-weight: 700; }
+    .opt-desc { font-size: 11px; color: var(--mute); font-family: 'DM Mono', monospace; margin-top: 2px; }
+
+    .opt-badge {
+      position: relative; z-index: 1; flex-shrink: 0;
+      font-size: 10px; font-family: 'DM Mono', monospace;
+      padding: 3px 8px; border-radius: 100px; border: 1px solid;
+      white-space: nowrap;
+    }
+
+    .opt-badge.xverse  { color: var(--blue);   border-color: rgba(108,142,245,0.3); background: rgba(108,142,245,0.08); }
+    .opt-badge.leather { color: var(--btc);    border-color: rgba(247,147,26,0.3);  background: var(--btc-soft); }
+    .opt-badge.wc      { color: var(--green);  border-color: rgba(61,186,126,0.3);  background: rgba(61,186,126,0.07); }
+    .opt-badge.browser { color: var(--btc);    border-color: var(--btc); background: var(--btc-soft); }
+
+    .recommended-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: var(--btc);
+      color: black;
+      font-size: 9px;
+      padding: 2px 8px;
+      border-radius: 100px;
+      font-weight: bold;
+      z-index: 10;
+    }
+
+    .wc-panel {
+      background: var(--panel); border: 1px solid rgba(61,186,126,0.2);
+      border-radius: 14px; padding: 18px;
+      margin-bottom: 8px; display: none;
+    }
+
+    .wc-panel.show { display: block; animation: rise 0.35s both; }
+
+    .wc-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .wc-title { font-size: 14px; font-weight: 700; }
+    .wc-sub   { font-size: 10px; color: var(--mute); font-family: 'DM Mono', monospace; margin-top: 2px; }
+
+    .wc-close {
+      background: var(--panel2); border: 1px solid var(--line);
+      border-radius: 7px; padding: 4px 10px;
+      font-size: 11px; font-family: 'DM Mono', monospace; color: var(--mute);
+      cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+    }
+    .wc-close:hover { color: var(--red); border-color: rgba(224,82,82,0.3); }
+
+    .qr-wrap {
+      display: flex; justify-content: center; margin-bottom: 12px;
+    }
+    #qrCanvas {
+      width: 200px; height: 200px;
+      border-radius: 12px;
+      background: white; padding: 8px;
+    }
+
+    .wc-uri-row {
+      display: flex; align-items: center; gap: 7px;
+      background: var(--panel2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px;
+    }
+
+    .wc-uri {
+      flex: 1; font-size: 10px; font-family: 'DM Mono', monospace;
+      color: var(--mute); overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .copy-btn {
+      background: transparent; border: 1px solid var(--line);
+      border-radius: 6px; padding: 3px 8px;
+      font-size: 10px; font-family: 'DM Mono', monospace; color: var(--mute);
+      cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+    }
+    .copy-btn:hover { color: var(--green); border-color: rgba(61,186,126,0.3); }
+
+    .wc-steps {
+      margin-top: 10px; font-size: 11px; font-family: 'DM Mono', monospace;
+      color: var(--mute); line-height: 1.8;
+    }
+    .wc-steps span { color: var(--green); }
+
+    .wc-waiting {
+      display: flex; align-items: center; gap: 8px; margin-top: 10px;
+      font-size: 11px; font-family: 'DM Mono', monospace; color: var(--green);
+    }
+    .dot-pulse { display: flex; gap: 3px; }
+    .dot-pulse span {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--green);
+      animation: dotpulse 1.2s ease-in-out infinite;
+    }
+    .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+    .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+
+    .connected-card {
+      background: var(--panel); border: 1px solid rgba(61,186,126,0.2);
+      border-radius: 14px; padding: 16px;
+      margin-bottom: 10px; display: none;
+    }
+    .connected-card.show { display: block; animation: pop 0.38s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+    .conn-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .check-circle {
+      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+      background: rgba(61,186,126,0.14); border: 1px solid rgba(61,186,126,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; color: var(--green);
+    }
+    .conn-title { font-size: 14px; font-weight: 700; }
+    .conn-meta  { font-size: 10px; color: var(--mute); font-family: 'DM Mono', monospace; margin-top: 1px; }
+
+    .addr-rows { display: flex; flex-direction: column; gap: 6px; }
+    .addr-row {
+      background: var(--panel2); border-radius: 9px; padding: 9px 11px;
+    }
+    .addr-chain { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--mute); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 3px; }
+    .addr-val   { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--txt); word-break: break-all; }
+
+    .confirm-btn {
+      width: 100%; margin-top: 10px;
+      background: rgba(61,186,126,0.12); border: 1px solid rgba(61,186,126,0.25);
+      border-radius: 11px; padding: 12px;
+      font-size: 14px; font-weight: 700; font-family: 'Cabinet Grotesk', sans-serif;
+      color: var(--green); cursor: pointer; transition: all 0.2s;
+    }
+    .confirm-btn:hover { background: rgba(61,186,126,0.22); }
+
+    .err-banner {
+      background: rgba(224,82,82,0.07); border: 1px solid rgba(224,82,82,0.2);
+      border-radius: 9px; padding: 9px 12px;
+      font-size: 11px; font-family: 'DM Mono', monospace; color: var(--red);
+      margin-bottom: 8px; display: none; line-height: 1.5;
+    }
+    .err-banner.show { display: block; animation: rise 0.3s both; }
+
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      margin: 8px 0 12px;
+    }
+    .div-line { flex: 1; height: 1px; background: var(--line); }
+    .div-txt  { font-size: 10px; color: var(--mute); font-family: 'DM Mono', monospace; }
+
+    .input-block { animation: rise 0.42s 0.18s cubic-bezier(0.22,1,0.36,1) both; }
+    .input-wrap  { position: relative; }
+
+    .addr-input {
+      width: 100%;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 11px; padding: 12px 76px 12px 13px;
+      font-size: 13px; font-family: 'DM Mono', monospace; color: var(--txt);
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+    }
+
+    .addr-input::placeholder { color: var(--mute); }
+    .addr-input:focus { border-color: rgba(255,255,255,0.13); }
+    .addr-input.ok  { border-color: var(--green); box-shadow: 0 0 0 3px rgba(61,186,126,0.09); }
+    .addr-input.err { border-color: var(--red);   box-shadow: 0 0 0 3px rgba(224,82,82,0.09); }
+
+    .paste-btn {
+      position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+      background: var(--panel2); border: 1px solid var(--line);
+      border-radius: 7px; padding: 4px 9px;
+      font-size: 10px; font-family: 'DM Mono', monospace; color: var(--mute);
+      cursor: pointer; transition: all 0.2s;
+    }
+    .paste-btn:hover { color: var(--btc); border-color: rgba(247,147,26,0.28); }
+
+    .hint { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--mute); margin-top: 6px; padding-left: 1px; }
+    .hint.ok  { color: var(--green); }
+    .hint.err { color: var(--red); }
+
+    .cta {
+      width: 100%; margin-top: 10px;
+      background: linear-gradient(135deg, var(--btc), #c97614);
+      border: none; border-radius: 12px; padding: 14px;
+      font-size: 15px; font-weight: 700; font-family: 'Cabinet Grotesk', sans-serif;
+      color: #000; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden;
+      animation: rise 0.42s 0.22s cubic-bezier(0.22,1,0.36,1) both;
+    }
+    .cta::after {
+      content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+      transition: left 0.5s;
+    }
+    .cta:hover::after { left: 150%; }
+    .cta:hover        { transform: translateY(-1px); box-shadow: 0 8px 20px var(--btc-glow); }
+    .cta:active       { transform: none; }
+    .cta:disabled     { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .spin {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid rgba(0,0,0,0.25); border-top-color: #000;
+      border-radius: 50%; animation: rot 0.5s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="logo">₿</div>
+    <div>
+      <div class="app-title">Bitcoin Yield Copilot</div>
+      <div class="app-sub" id="environmentSub">connect wallet</div>
+    </div>
+    <div class="net-row">
+      <div class="net-chip" data-net="mainnet" onclick="setNetwork('mainnet')">main</div>
+      <div class="net-chip" data-net="testnet" onclick="setNetwork('testnet')">test</div>
+      <div class="net-chip" data-net="devnet"  onclick="setNetwork('devnet')">dev</div>
+    </div>
+  </div>
+
+  <div class="net-banner mainnet" id="netBanner">
+    <span id="netIcon">🟠</span>
+    <span id="netTxt">Mainnet — real sBTC and STX. Transactions are irreversible.</span>
+  </div>
+
+  <div class="env-hint" id="envHint"></div>
+
+  <div class="connected-card" id="connectedCard">
+    <div class="conn-header">
+      <div class="check-circle">✓</div>
+      <div>
+        <div class="conn-title">Wallet Connected</div>
+        <div class="conn-meta" id="connMeta">—</div>
+      </div>
+    </div>
+    <div class="addr-rows" id="addrRows"></div>
+    <button class="confirm-btn" onclick="sendToBotAndClose()">
+      ✓ Confirm &amp; Return to Bot
+    </button>
+  </div>
+
+  <div class="err-banner" id="errBanner"></div>
+
+  <div id="mobileWalletsSection"></div>
+  <div id="extensionWalletsSection"></div>
+
+  <div class="divider">
+    <div class="div-line"></div>
+    <div class="div-txt">or enter address manually</div>
+    <div class="div-line"></div>
+  </div>
+
+  <div class="input-block">
+    <div class="section-label">Stacks address</div>
+    <div class="input-wrap">
+      <input class="addr-input" id="addrInput" type="text" placeholder="SP… or ST…"
+        autocomplete="off" autocorrect="off" spellcheck="false"
+        oninput="onAddrInput(this.value)" />
+      <button class="paste-btn" onclick="pasteAddr()">Paste</button>
+    </div>
+    <div class="hint" id="hint">SP / SM = mainnet · ST / SN = testnet</div>
+  </div>
+
+  <button class="cta" id="ctaBtn" disabled onclick="submitManual()">
+    Connect Wallet
+  </button>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<script type="module">
+  // ==================== CONFIGURAÇÕES ====================
+  const CONFIG = {
+    projectId: '366383bfce79454bae7c2e242f0f24c2',
+    xverse: {
+      universalLink: 'https://xverse.app/browser',
+      deepLink: 'xverse://browser'
+    }
+  };
+
+  // ==================== DETECÇÃO DE AMBIENTE ====================
+  const tg = window.Telegram?.WebApp;
+  const inTelegram = !!tg;
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const inIframe = window.self !== window.top;
+  
+  if (tg) { 
+    tg.ready(); 
+    tg.expand(); 
+    tg.setHeaderColor('#080808'); 
+    tg.setBackgroundColor('#080808'); 
+  }
+
+  // ==================== ESTADO DA APLICAÇÃO ====================
+  let walletData = null;
+  let wcClient = null;
+  let wcUri = null;
+  let NET = new URLSearchParams(window.location.search).get('network') || 'mainnet';
+
+  // Regex CORRIGIDA para endereços Stacks - agora aceita 28-65 caracteres
+  const ADDR_RE = /^(SP|SM|ST|SN)[A-HJ-NP-Za-km-z1-9]{28,65}$/;
+
+  const NET_INFO = {
+    mainnet: { 
+      icon: '🟠', 
+      txt: 'Mainnet — real sBTC and STX. Transactions are irreversible.', 
+      wcChain: 'stacks:1',
+      addressPrefix: ['SP', 'SM']
+    },
+    testnet: { 
+      icon: '🔵', 
+      txt: 'Testnet — test tokens only. Safe for development.',             
+      wcChain: 'stacks:2147483648',
+      addressPrefix: ['ST', 'SN']
+    },
+    devnet: { 
+      icon: '🟣', 
+      txt: 'Devnet — local Clarinet node running on your machine.',          
+      wcChain: 'stacks:2147483648',
+      addressPrefix: ['ST', 'SN']
+    },
+  };
+
+  // ==================== FUNÇÕES DE UI ====================
+  function showError(msg) {
+    const el = document.getElementById('errBanner');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 5000);
+  }
+
+  function showConnected({ stx, btc, network, source }) {
+    walletData = { stx, btc, network, source };
+    
+    document.getElementById('connMeta').textContent = `${network} · via ${source}`;
+    document.getElementById('addrRows').innerHTML = `
+      <div class="addr-row">
+        <div class="addr-chain">STX · Stacks</div>
+        <div class="addr-val">${stx}</div>
+      </div>
+      ${btc ? `<div class="addr-row"><div class="addr-chain">BTC · Bitcoin</div><div class="addr-val">${btc}</div></div>` : ''}
+    `;
+    document.getElementById('connectedCard').classList.add('show');
+    document.getElementById('errBanner').classList.remove('show');
+    const wcPanel = document.getElementById('wcPanel');
+    if (wcPanel) wcPanel.classList.remove('show');
+    document.getElementById('addrInput').value = stx;
+    window.onAddrInput(stx);
+  }
+
+  // ==================== INICIALIZAÇÃO DAS OPÇÕES ====================
+  function initializeWalletOptions() {
+    const mobileSection = document.getElementById('mobileWalletsSection');
+    const extensionSection = document.getElementById('extensionWalletsSection');
+    const envHint = document.getElementById('envHint');
+    const envSub = document.getElementById('environmentSub');
+    
+    mobileSection.innerHTML = '';
+    extensionSection.innerHTML = '';
+    
+    if (inTelegram && isMobile) {
+      // CENÁRIO A: Telegram Mobile
+      envHint.className = 'env-hint show telegram-mode';
+      envHint.innerHTML = `
+        <strong>📱 Modo Telegram Mobile</strong><br><br>
+        • ✅ <strong>Xverse</strong> - Funciona perfeitamente (recomendado)<br>
+        • ⚠️ WalletConnect - Não funciona dentro do Telegram<br>
+        • 📝 Entrada manual - Alternativa confiável<br><br>
+        <small>Use Xverse ou cole seu endereço manualmente abaixo</small>
+      `;
+      envSub.textContent = '📱 Telegram Mobile';
+      
+      mobileSection.innerHTML = `
+        <div class="section-label">📱 Mobile</div>
+        <button class="wallet-opt xverse recommended" id="xverseBtn" onclick="window.openXverseMobile()" style="position:relative;">
+          <div class="recommended-badge">⭐ RECOMENDADO</div>
+          <div class="opt-icon xverse">✦</div>
+          <div class="opt-info">
+            <div class="opt-name">Xverse</div>
+            <div class="opt-desc">Melhor opção para Telegram</div>
+          </div>
+          <div class="opt-badge xverse" id="xverseBadge">Conectar</div>
+        </button>
+        <button class="wallet-opt browser" onclick="window.copyLink()">
+          <div class="opt-icon browser">🔗</div>
+          <div class="opt-info">
+            <div class="opt-name">Copiar Link</div>
+            <div class="opt-desc">Para abrir no navegador</div>
+          </div>
+          <div class="opt-badge browser">Copiar</div>
+        </button>
+      `;
+      
+    } else if (inTelegram && !isMobile) {
+      // CENÁRIO B: Telegram Desktop
+      envHint.className = 'env-hint show telegram-mode';
+      envHint.innerHTML = `
+        <strong>💻 Modo Telegram Desktop</strong><br><br>
+        • ✅ <strong>Leather</strong> - Extensão recomendada<br>
+        • 📝 Entrada manual - Alternativa confiável<br><br>
+        <small>Instale a extensão Leather ou cole seu endereço</small>
+      `;
+      envSub.textContent = '💻 Telegram Desktop';
+      
+      mobileSection.innerHTML = `
+        <div class="section-label">💻 Extensões</div>
+        <button class="wallet-opt leather recommended" onclick="window.connectLeather()" style="position:relative;">
+          <div class="recommended-badge">⭐ RECOMENDADO</div>
+          <div class="opt-icon leather">🔐</div>
+          <div class="opt-info">
+            <div class="opt-name">Leather</div>
+            <div class="opt-desc">Extensão Bitcoin + Stacks</div>
+          </div>
+          <div class="opt-badge leather" id="leatherBadge">Conectar</div>
+        </button>
+      `;
+      
+    } else {
+      // CENÁRIO C: Fora do Telegram
+      envHint.className = 'env-hint show browser-mode';
+      envHint.innerHTML = `
+        <strong>🌐 Modo Navegador</strong><br><br>
+        • ✅ Todas opções disponíveis<br>
+        • Escolha seu método preferido
+      `;
+      envSub.textContent = '🌐 Navegador';
+      
+      mobileSection.innerHTML = `
+        <div class="section-label">📱 Mobile / WalletConnect</div>
+        <button class="wallet-opt xverse" onclick="window.openXverseMobile()">
+          <div class="opt-icon xverse">✦</div>
+          <div class="opt-info">
+            <div class="opt-name">Xverse</div>
+            <div class="opt-desc">Mobile app via deep link</div>
+          </div>
+          <div class="opt-badge xverse" id="xverseBadge">Abrir</div>
+        </button>
+        <button class="wallet-opt wc" onclick="window.toggleWC()">
+          <div class="opt-icon wc">◈</div>
+          <div class="opt-info">
+            <div class="opt-name">WalletConnect</div>
+            <div class="opt-desc">QR code · qualquer wallet</div>
+          </div>
+          <div class="opt-badge wc" id="wcBadge">Scan QR</div>
+        </button>
+      `;
+      
+      extensionSection.innerHTML = `
+        <div class="section-label" style="margin-top: 8px;">💻 Extensões</div>
+        <button class="wallet-opt leather" onclick="window.connectLeather()">
+          <div class="opt-icon leather">🔐</div>
+          <div class="opt-info">
+            <div class="opt-name">Leather</div>
+            <div class="opt-desc">Extensão para navegador</div>
+          </div>
+          <div class="opt-badge leather" id="leatherBadge">Conectar</div>
+        </button>
+      `;
+    }
+    
+    // Adicionar WC Panel apenas se não existir e não for Telegram mobile
+    if (!document.getElementById('wcPanel') && !(inTelegram && isMobile)) {
+      const wcPanel = document.createElement('div');
+      wcPanel.className = 'wc-panel';
+      wcPanel.id = 'wcPanel';
+      wcPanel.innerHTML = `
+        <div class="wc-header">
+          <div>
+            <div class="wc-title">WalletConnect</div>
+            <div class="wc-sub">Escaneie com sua wallet</div>
+          </div>
+          <button class="wc-close" onclick="window.toggleWC()">✕ Fechar</button>
+        </div>
+        <div class="qr-wrap">
+          <canvas id="qrCanvas" width="200" height="200"></canvas>
+        </div>
+        <div class="wc-uri-row">
+          <span class="wc-uri" id="wcUriDisplay">gerando...</span>
+          <button class="copy-btn" onclick="window.copyWcUri()">Copiar</button>
+        </div>
+        <div class="wc-waiting" id="wcWaiting">
+          <div class="dot-pulse"><span></span><span></span><span></span></div>
+          Aguardando aprovação...
+        </div>
+      `;
+      mobileSection.appendChild(wcPanel);
+    }
+  }
+
+  // ==================== FUNÇÕES DAS WALLETS ====================
+  
+  // Xverse Mobile
+  window.openXverseMobile = () => {
+    const badge = document.getElementById('xverseBadge');
+    if (badge) badge.textContent = 'Abrindo...';
+    
+    const miniAppUrl = encodeURIComponent(window.location.href + 
+      (window.location.href.includes('?') ? '&inXverse=1' : '?inXverse=1'));
+    
+    if (inTelegram && isMobile) {
+      const confirmed = confirm(
+        '📲 Abrir Xverse?\n\n' +
+        'O app Xverse será aberto. Após conectar, volte ao Telegram.'
+      );
+      
+      if (confirmed) {
+        window.location.href = `${CONFIG.xverse.deepLink}?url=${miniAppUrl}`;
+        setTimeout(() => {
+          window.location.href = `${CONFIG.xverse.universalLink}?url=${miniAppUrl}`;
+        }, 800);
+      }
+    } else {
+      window.location.href = `${CONFIG.xverse.universalLink}?url=${miniAppUrl}`;
+      setTimeout(() => {
+        window.location.href = `${CONFIG.xverse.deepLink}?url=${miniAppUrl}`;
+      }, 1800);
+    }
+  };
+
+  // Copiar link (para Telegram)
+  window.copyLink = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      alert('Link copiado! Cole no navegador para usar WalletConnect.');
+    });
+  };
+
+  // Xverse in-app
+  if (new URLSearchParams(window.location.search).get('inXverse') === '1') {
+    connectXverseInApp();
+  }
+
+  async function connectXverseInApp() {
+    try {
+      const { request } = await import('https://esm.sh/sats-connect@4');
+      const badge = document.getElementById('xverseBadge');
+      if (badge) badge.textContent = 'Conectando...';
+      
+      await new Promise((resolve, reject) => {
+        request('wallet_connect', {
+          message: 'Bitcoin Yield Copilot — connect your wallet',
+          addresses: ['stacks', 'payment'],
+        }).then(res => {
+          if (res.status !== 'success') throw new Error('Conexão rejeitada');
+          
+          const stx = res.result.addresses.find(a => a.purpose === 'stacks')?.address;
+          const btc = res.result.addresses.find(a => a.purpose === 'payment')?.address || null;
+          
+          if (!stx) throw new Error('Nenhum endereço Stacks retornado');
+          
+          const network = NET_INFO.mainnet.addressPrefix.includes(stx.substring(0,2)) ? 'mainnet' : 'testnet';
+          showConnected({ stx, btc, network, source: 'xverse-mobile' });
+          resolve();
+        }).catch(reject);
+      });
+    } catch (e) {
+      showError(`Xverse: ${e.message}`);
+    }
+  }
+
+  // WalletConnect
+  window.toggleWC = async () => {
+    const panel = document.getElementById('wcPanel');
+    
+    if (!panel) return;
+    
+    if (panel.classList.contains('show')) {
+      panel.classList.remove('show');
+      const badge = document.getElementById('wcBadge');
+      if (badge) badge.textContent = 'Scan QR';
+      return;
+    }
+    
+    const badge = document.getElementById('wcBadge');
+    if (badge) badge.textContent = 'Carregando...';
+    panel.classList.add('show');
+    if (!wcUri) await initWalletConnect();
+  };
+
+  async function initWalletConnect() {
+    try {
+      const { SignClient } = await import('https://esm.sh/@walletconnect/sign-client@2');
+      
+      wcClient = await SignClient.init({
+        projectId: CONFIG.projectId,
+        metadata: {
+          name: 'Bitcoin Yield Copilot',
+          description: 'Autonomous Bitcoin yield management',
+          url: window.location.origin,
+          icons: ['https://avatars.githubusercontent.com/u/37784886'],
+        },
+      });
+      
+      const chain = NET_INFO[NET].wcChain;
+      const { uri, approval } = await wcClient.connect({
+        requiredNamespaces: {
+          stacks: {
+            methods: ['stacks_signMessage', 'stacks_stxTransfer', 'stacks_contractCall'],
+            chains: [chain],
+            events: [],
+          },
+        },
+      });
+      
+      wcUri = uri;
+      renderQR(uri);
+      document.getElementById('wcUriDisplay').textContent = uri;
+      const badge = document.getElementById('wcBadge');
+      if (badge) badge.textContent = 'Scan QR';
+      
+      const session = await approval();
+      const accounts = session.namespaces?.stacks?.accounts || [];
+      const stxFull = accounts[0] || '';
+      const stx = stxFull.split(':')[2] || '';
+      
+      if (!stx) throw new Error('Nenhum endereço retornado');
+      
+      const network = NET_INFO.mainnet.addressPrefix.includes(stx.substring(0,2)) ? 'mainnet' : 'testnet';
+      showConnected({ stx, btc: null, network, source: 'walletconnect' });
+      
+    } catch (e) {
+      if (!e.message?.includes('closed') && !e.message?.includes('cancelled')) {
+        showError(`WalletConnect: ${e.message}`);
+      }
+      const panel = document.getElementById('wcPanel');
+      if (panel) panel.classList.remove('show');
+      const badge = document.getElementById('wcBadge');
+      if (badge) badge.textContent = 'Scan QR';
+      wcUri = null;
+    }
+  }
+
+  function renderQR(text) {
+    const canvas = document.getElementById('qrCanvas');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 200, 200);
+    
+    if (window.QRCode) {
+      const container = document.createElement('div');
+      new window.QRCode(container, {
+        text,
+        width: 184, height: 184,
+        colorDark: '#000', colorLight: '#fff',
+        correctLevel: window.QRCode.CorrectLevel.M,
+      });
+      
+      setTimeout(() => {
+        const img = container.querySelector('img') || container.querySelector('canvas');
+        if (img) {
+          ctx.clearRect(0, 0, 200, 200);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, 200, 200);
+          ctx.drawImage(img, 8, 8, 184, 184);
+        }
+      }, 200);
+    }
+  }
+
+  window.copyWcUri = () => {
+    if (!wcUri) return;
+    navigator.clipboard.writeText(wcUri).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      if (btn) {
+        btn.textContent = 'Copiado!';
+        setTimeout(() => { btn.textContent = 'Copiar'; }, 1800);
+      }
+    });
+  };
+
+  // Leather
+  window.connectLeather = async () => {
+    try {
+      const mod = await import('https://esm.sh/@stacks/connect@8.2.5');
+      const { connect } = mod;
+      
+      const badge = document.getElementById('leatherBadge');
+      if (badge) badge.textContent = 'Conectando...';
+      
+      const res = await connect();
+      const stx = res?.addresses?.stx?.[0]?.address;
+      const btc = res?.addresses?.btc?.[0]?.address || null;
+      
+      if (!stx) throw new Error('Nenhum endereço STX retornado');
+      
+      const network = NET_INFO.mainnet.addressPrefix.includes(stx.substring(0,2)) ? 'mainnet' : 'testnet';
+      showConnected({ stx, btc, network, source: 'leather' });
+      
+      if (badge) badge.textContent = 'Conectado';
+      
+    } catch (e) {
+      showError(`Leather: ${e.message}`);
+      const badge = document.getElementById('leatherBadge');
+      if (badge) badge.textContent = 'Conectar';
+    }
+  };
+
+  // ==================== NETWORK ====================
+  window.setNetwork = (n) => {
+    NET = n;
+    document.querySelectorAll('.net-chip').forEach(c => 
+      c.classList.toggle('active', c.dataset.net === n)
+    );
+    
+    const info = NET_INFO[n];
+    document.getElementById('netBanner').className = `net-banner ${n}`;
+    document.getElementById('netIcon').textContent = info.icon;
+    document.getElementById('netTxt').textContent = info.txt;
+    
+    const v = document.getElementById('addrInput').value;
+    if (v) window.onAddrInput(v);
+  };
+
+  // ==================== INPUT MANUAL ====================
+  window.onAddrInput = (val) => {
+    val = val.trim();
+    const inp = document.getElementById('addrInput');
+    const hin = document.getElementById('hint');
+    const btn = document.getElementById('ctaBtn');
+    
+    if (!val) {
+      inp.className = 'addr-input';
+      hin.className = 'hint';
+      btn.disabled = true;
+      hin.textContent = 'SP / SM = mainnet · ST / SN = testnet';
+      return;
+    }
+    
+    if (ADDR_RE.test(val)) {
+      const prefix = val.substring(0,2);
+      const isMainnet = NET_INFO.mainnet.addressPrefix.includes(prefix);
+      const expectedNet = isMainnet ? 'mainnet' : 'testnet';
+      
+      inp.className = 'addr-input ok';
+      hin.className = 'hint ok';
+      btn.disabled = false;
+      hin.textContent = `✅ Endereço ${expectedNet} válido!`;
+      
+    } else {
+      inp.className = 'addr-input err';
+      hin.className = 'hint err';
+      btn.disabled = true;
+      
+      if (val.length >= 4) {
+        hin.textContent = '❌ Formato inválido (deve começar com SP/SM/ST/SN)';
+      } else {
+        hin.textContent = 'SP / SM = mainnet · ST / SN = testnet';
+      }
+    }
+  };
+
+  window.pasteAddr = async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      document.getElementById('addrInput').value = t.trim();
+      window.onAddrInput(t.trim());
+    } catch {
+      document.getElementById('addrInput').focus();
+    }
+  };
+
+  window.submitManual = () => {
+    const addr = document.getElementById('addrInput').value.trim();
+    if (!ADDR_RE.test(addr)) return;
+    
+    const btn = document.getElementById('ctaBtn');
+    btn.innerHTML = '<span class="spin"></span>Conectando...';
+    btn.disabled = true;
+    
+    const prefix = addr.substring(0,2);
+    const network = NET_INFO.mainnet.addressPrefix.includes(prefix) ? 'mainnet' : 'testnet';
+    
+    const payload = JSON.stringify({
+      type: 'wallet_connected',
+      address: addr,
+      btcAddress: null,
+      network,
+      source: 'manual',
+      timestamp: Date.now(),
+    });
+    
+    setTimeout(() => {
+      if (tg) {
+        tg.sendData(payload);
+        btn.innerHTML = '✓ Enviado!';
+      } else {
+        console.log('[dev] payload:', payload);
+        btn.innerHTML = '✓ Done (dev mode)';
+      }
+    }, 350);
+  };
+
+  window.sendToBotAndClose = () => {
+    if (!walletData) return;
+    
+    const payload = JSON.stringify({
+      type: 'wallet_connected',
+      address: walletData.stx,
+      btcAddress: walletData.btc || null,
+      network: walletData.network,
+      source: walletData.source,
+      timestamp: Date.now(),
+    });
+    
+    if (tg) {
+      tg.sendData(payload);
+    } else {
+      console.log('[dev] payload:', payload);
+    }
+  };
+
+  // ==================== INICIALIZAÇÃO ====================
+  window.setNetwork(NET);
+  initializeWalletOptions();
+</script>
+</body>
+</html>

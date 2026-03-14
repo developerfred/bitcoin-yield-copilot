@@ -3,7 +3,6 @@
 ;; Allows the Bitcoin Yield Copilot to have a verifiable on-chain identity
 
 ;; Error codes
-(define-constant ERR-NOT-AUTHORIZED (err u401))
 (define-constant ERR-NOT-FOUND (err u404))
 (define-constant ERR-ALREADY-REGISTERED (err u409))
 

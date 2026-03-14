@@ -4,10 +4,12 @@ const envSchema = z.object({
   // Skip validation flag
   SKIP_CONFIG_VALIDATION: z.string().optional(),
 
-  // Anthropic / OpenRouter
+  // Anthropic / OpenRouter / Minimax
   ANTHROPIC_API_KEY: z.string().min(1),
-  LLM_PROVIDER: z.enum(['anthropic', 'openrouter']).default('anthropic'),
+  LLM_PROVIDER: z.enum(['anthropic', 'openrouter', 'minimax']).default('anthropic'),
   OPENROUTER_API_KEY: z.string().optional(),
+  MINIMAX_API_KEY: z.string().optional(),
+  MINIMAX_GROUP_ID: z.string().optional(),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().min(1),
@@ -46,9 +48,11 @@ const envSchema = z.object({
 
 export const config = {
   llm: {
-    provider: (process.env.LLM_PROVIDER as 'anthropic' | 'openrouter') || 'anthropic',
+    provider: (process.env.LLM_PROVIDER as 'anthropic' | 'openrouter' | 'minimax') || 'anthropic',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
+    minimaxApiKey: process.env.MINIMAX_API_KEY,
+    minimaxGroupId: process.env.MINIMAX_GROUP_ID,
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',

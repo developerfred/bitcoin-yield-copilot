@@ -1,0 +1,60 @@
+{
+  "version": "5",
+  "remote": {
+    "https://deno.land/x/clarinet@v1.0.0/index.ts": "7b758104b0d1292982b6b2874d50a3938414b8ea530d80a503294f7e587d37c7",
+    "https://deno.land/x/clarinet@v1.2.0/index.ts": "8441e6b42a850bb2ecb58f81d86d6293366ddf73d911e55ee07a3c19a1feed99",
+    "https://deno.land/x/clarinet@v1.2.0/types.ts": "fd51aa8db0a9da24da837ce34c848d83c84ab42e9cda6345602ed8efbcef107d",
+    "https://deno.land/x/clarinet@v1.5.4/clarityTypes.ts": "1fa191738eef1430c37c590ff5502555d8ea26eea5362e0744afb7da155c35d8",
+    "https://deno.land/x/clarinet@v1.5.4/eventTypes.ts": "fd51aa8db0a9da24da837ce34c848d83c84ab42e9cda6345602ed8efbcef107d",
+    "https://deno.land/x/clarinet@v1.5.4/index.ts": "2ffe1d220d2c0f5e1fa4db6663786263b56996d10944f282aad4368b90bb3f11",
+    "https://deno.land/x/clarinet@v1.7.1/clarityTypes.ts": "1fa191738eef1430c37c590ff5502555d8ea26eea5362e0744afb7da155c35d8",
+    "https://deno.land/x/clarinet@v1.7.1/eventTypes.ts": "fd51aa8db0a9da24da837ce34c848d83c84ab42e9cda6345602ed8efbcef107d",
+    "https://deno.land/x/clarinet@v1.7.1/index.ts": "2ffe1d220d2c0f5e1fa4db6663786263b56996d10944f282aad4368b90bb3f11"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@aibtc/mcp-server@^1.28.1",
+        "npm:@anthropic-ai/sdk@0.39",
+        "npm:@modelcontextprotocol/sdk@^1.10.0",
+        "npm:@noble/curves@^2.0.1",
+        "npm:@noble/hashes@^2.0.1",
+        "npm:@noble/secp256k1@3",
+        "npm:@scure/bip39@^2.0.1",
+        "npm:@scure/btc-signer@^2.0.1",
+        "npm:@stacks/connect@^8.2.5",
+        "npm:@stacks/encryption@^7.3.1",
+        "npm:@stacks/network@^7.3.1",
+        "npm:@stacks/transactions@^7.3.1",
+        "npm:@stacks/wallet-sdk@^7.2.0",
+        "npm:@types/better-sqlite3@^7.6.12",
+        "npm:@types/deep-eql@^4.0.2",
+        "npm:@types/node@^22.10.5",
+        "npm:@typescript-eslint/eslint-plugin@^8.21.0",
+        "npm:@typescript-eslint/parser@^8.21.0",
+        "npm:@x402/axios@^2.6.0",
+        "npm:@x402/core@^2.6.0",
+        "npm:@x402/evm@^2.6.0",
+        "npm:@x402/fetch@^2.6.0",
+        "npm:better-sqlite3@^11.8.1",
+        "npm:bip32@^5.0.1",
+        "npm:bip39@^3.1.0",
+        "npm:c32check@2",
+        "npm:clarinet@~0.12.6",
+        "npm:commitlint@19",
+        "npm:dotenv@^16.4.7",
+        "npm:elliptic@^6.6.1",
+        "npm:eslint@^9.18.0",
+        "npm:grammy@^1.33.0",
+        "npm:husky@^9.1.7",
+        "npm:pino-pretty@13",
+        "npm:pino@^9.6.0",
+        "npm:sql.js@^1.14.1",
+        "npm:tsx@^4.19.2",
+        "npm:typescript@^5.7.3",
+        "npm:vitest@^3.0.4",
+        "npm:zod@^3.24.1"
+      ]
+    }
+  }
+}
