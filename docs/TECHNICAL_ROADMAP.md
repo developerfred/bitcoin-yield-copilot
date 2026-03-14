@@ -1,18 +1,18 @@
-# 🚀 Roadmap Técnico - Bitcoin Yield Copilot
+# Technical Roadmap - Bitcoin Yield Copilot
 
-## Objetivo: Completar os 3 Bountys do BUIDL Battle #2
+## Goal: Complete the 3 Bounties from BUIDL Battle #2
 
-1. **sBTC Innovation** - Uso inovador de sBTC
-2. **USDCx** - Melhor uso de USDCx no Stacks  
-3. **x402 Molbots** - Protocolo para molbots interagirem e pagarem via x402
+1. **sBTC Innovation** - Innovative use of sBTC
+2. **USDCx** - Best use of USDCx on Stacks
+3. **x402 Molbots** - Protocol for molbots to interact and pay via x402
 
 ---
 
-## 📦 FASE 1: Infraestrutura Base (Semanas 1-2)
+## Phase 1: Base Infrastructure (Weeks 1-2)
 
 ### 1.1 Molbot Registry (Smart Contract)
 
-**Objetivo**: Criar o registro central onde molbots se descobrem
+**Goal**: Create the central registry where molbots discover each other
 
 ```clarity
 ;; molbot-registry.clar
@@ -21,7 +21,7 @@
 (define-constant ERR-ALREADY-REGISTERED (err u409))
 (define-constant ERR-NOT-FOUND (err u404))
 
-;; Molbot capabilities - categorias de serviço
+;; Molbot capabilities - service categories
 (define-enum capability
   (yield-optimizer)
   (content-generator)
@@ -38,7 +38,7 @@
     name: (string-ascii 64),
     description: (string-ascii 256),
     capabilities: (list 10 capability),
-    price-per-call: uint,           ;; em micro-STX
+    price-per-call: uint,           ;; in micro-STX
     payment-token: (string-ascii 8), ;; "STX", "sBTC", "USDCx"
     rating: uint,                   ;; 0-100
     total-calls: uint,
@@ -110,19 +110,19 @@
 )
 
 (define-private (is-capability-match (entry { key: principal, value: (tuple) }))
-  ;; Implementar lógica de filtro
+  ;; Implement filter logic
 )
 ```
 
-**Arquivos a criar**: `contracts/molbot-registry.clar`
+**Files to create**: `contracts/molbot-registry.clar`
 
-**Dependências**: Nenhuma (primeiro contrato)
+**Dependencies**: None (first contract)
 
 ---
 
 ### 1.2 Molbot Payment Contract
 
-**Objetivo**: Contrato que gerencia pagamentos entre molbots
+**Goal**: Contract that manages payments between molbots
 
 ```clarity
 ;; molbot-payment.clar
@@ -202,17 +202,17 @@
 )
 ```
 
-**Arquivos a criar**: `contracts/molbot-payment.clar`
+**Files to create**: `contracts/molbot-payment.clar`
 
-**Dependências**: `molbot-registry.clar`
+**Dependencies**: `molbot-registry.clar`
 
 ---
 
-## 📦 FASE 2: Molbot Marketplace (Semanas 2-3)
+## Phase 2: Molbot Marketplace (Weeks 2-3)
 
 ### 2.1 Molbot Service Types
 
-**Objetivo**: Definir os tipos de serviços que molbots podem oferecer
+**Goal**: Define the types of services molbots can offer
 
 ```typescript
 // src/molbot/types.ts
@@ -260,7 +260,7 @@ export interface MolbotDiscovery {
 
 ### 2.2 Molbot Client (TypeScript)
 
-**Objetivo**: Biblioteca para molbots se comunicarem
+**Goal**: Library for molbots to communicate
 
 ```typescript
 // src/molbot/client.ts
@@ -358,7 +358,7 @@ export class MolbotClient {
 }
 ```
 
-**Arquivos a criar**: 
+**Files to create**: 
 - `src/molbot/types.ts`
 - `src/molbot/client.ts`
 - `src/molbot/index.ts`
@@ -386,7 +386,7 @@ export interface YieldOptimizationResult {
   swapRoute?: string[];
 }
 
-// Service que o molbot oferece
+// Service that the molbot offers
 export class YieldOptimizerMolbot {
   async optimize(request: YieldOptimizationRequest): Promise<YieldOptimizationResult> {
     // 1. Fetch current APYs from all protocols
@@ -419,7 +419,7 @@ export class YieldOptimizerMolbot {
   }
   
   private async fetchAPYs(tokens: string[]): Promise<Record<string, number>> {
-    // Use MCP ou x402 paid endpoints
+    // Use MCP or x402 paid endpoints
   }
 }
 ```
@@ -471,18 +471,18 @@ export class ContentGeneratorMolbot {
 }
 ```
 
-**Arquivos a criar**:
+**Files to create**:
 - `src/molbot/yield-optimizer.ts`
 - `src/molbot/content-generator.ts`
 - `src/molbot/data-analyst.ts`
 
 ---
 
-## 📦 FASE 3: USDCx Integration (Semanas 3-4)
+## Phase 3: USDCx Integration (Weeks 3-4)
 
 ### 3.1 USDCx Adapter
 
-**Objetivo**: Integrar USDCx nos yield strategies
+**Goal**: Integrate USDCx into yield strategies
 
 ```typescript
 // src/protocols/usdcx.ts
@@ -548,9 +548,9 @@ export async function swapToUSDCx(
 }
 ```
 
-### 3.2 USDCx no Bot
+### 3.2 USDCx in Bot
 
-Adicionar handlers para USDCx:
+Add handlers for USDCx:
 
 ```typescript
 // src/bot/handlers/usdcx.ts
@@ -572,13 +572,13 @@ export function registerUSDCxHandlers(bot: Bot<Context>) {
 }
 ```
 
-**Arquivos a criar**:
+**Files to create**:
 - `src/protocols/usdcx.ts`
 - `src/bot/handlers/usdcx.ts`
 
 ---
 
-## 📦 FASE 4: x402 Payments Enhancements (Semanas 4-5)
+## Phase 4: x402 Payments Enhancements (Weeks 4-5)
 
 ### 4.1 Enhanced x402 Client
 
@@ -666,7 +666,7 @@ export class EnhancedX402Client extends X402Client {
 }
 ```
 
-### 4.2 x402 Middleware para Molbot Tasks
+### 4.2 x402 Middleware for Molbot Tasks
 
 ```typescript
 // src/x402/middleware.ts
@@ -721,13 +721,13 @@ export class X402PaymentRequired extends Error {
 }
 ```
 
-**Arquivos a criar**:
+**Files to create**:
 - `src/x402/enhanced-client.ts`
 - `src/x402/middleware.ts`
 
 ---
 
-## 📦 FASE 5: Smart Contract - Adapters Completos (Semanas 5-6)
+## Phase 5: Smart Contracts - Complete Adapters (Weeks 5-6)
 
 ### 5.1 Adapter Trait V3
 
@@ -818,14 +818,14 @@ export class X402PaymentRequired extends Error {
 )
 ```
 
-**Arquivos a criar**:
+**Files to create**:
 - `contracts/adapter-trait-v3.clar`
 - `contracts/usdcx-adapter.clar`
 - `contracts/swap-adapter.clar`
 
 ---
 
-## 📦 FASE 6: Integração Final (Semanas 6-8)
+## Phase 6: Final Integration (Weeks 6-8)
 
 ### 6.1 Molbot Marketplace UI
 
@@ -927,95 +927,95 @@ export function registerPaymentHandlers(bot: Bot<Context>) {
 
 ---
 
-## 📋 RESUMO DO ROADMAP
+## Roadmap Summary
 
-| Fase | Semanas | Componentes | Status |
-|------|---------|-------------|--------|
-| 1 | 1-2 | Molbot Registry + Payment Contract | 🔲 A criar |
-| 2 | 2-3 | Molbot Client + Discovery + Specialized Molbots | 🔲 A criar |
-| 3 | 3-4 | USDCx Adapter + Bot Integration | 🔲 A criar |
-| 4 | 4-5 | Enhanced x402 Client + Middleware | 🔲 A criar |
-| 5 | 5-6 | Adapter V3 + USDCx Adapter | 🔲 A criar |
-| 6 | 6-8 | Marketplace UI + Full Integration | 🔲 A criar |
+| Phase | Weeks | Components | Status |
+|-------|-------|------------|--------|
+| 1 | 1-2 | Molbot Registry + Payment Contract | 🔲 To create |
+| 2 | 2-3 | Molbot Client + Discovery + Specialized Molbots | 🔲 To create |
+| 3 | 3-4 | USDCx Adapter + Bot Integration | 🔲 To create |
+| 4 | 4-5 | Enhanced x402 Client + Middleware | 🔲 To create |
+| 5 | 5-6 | Adapter V3 + USDCx Adapter | 🔲 To create |
+| 6 | 6-8 | Marketplace UI + Full Integration | 🔲 To create |
 
 ---
 
-## 🎯 PRIORIDADE DE IMPLEMENTAÇÃO
+## Implementation Priority
 
-### Semana 1: Molbot Registry
+### Week 1: Molbot Registry
 - [ ] `contracts/molbot-registry.clar`
-- [ ] Testar no testnet
+- [ ] Test on testnet
 
-### Semana 2: Molbot Payment + Basic Client
+### Week 2: Molbot Payment + Basic Client
 - [ ] `contracts/molbot-payment.clar`
 - [ ] `src/molbot/types.ts`
 - [ ] `src/molbot/client.ts`
 
-### Semana 3: Specialized Molbots
+### Week 3: Specialized Molbots
 - [ ] Yield Optimizer
 - [ ] Content Generator
-- [ ] Testes de integração
+- [ ] Integration tests
 
-### Semana 4: USDCx
+### Week 4: USDCx
 - [ ] `src/protocols/usdcx.ts`
 - [ ] `src/bot/handlers/usdcx.ts`
 - [ ] USDCx Adapter contract
 
-### Semana 5: Enhanced x402
+### Week 5: Enhanced x402
 - [ ] `src/x402/enhanced-client.ts`
 - [ ] `src/x402/middleware.ts`
 
-### Semana 6-8: Marketplace + Integration
+### Week 6-8: Marketplace + Integration
 - [ ] Marketplace handlers
 - [ ] Payment handlers
-- [ ] Integração completa
-- [ ] Testes E2E
+- [ ] Complete integration
+- [ ] E2E tests
 
 ---
 
-## 📁 ARQUIVOS A CRIAR
+## Files to Create
 
-### Contratos Clarity
+### Clarity Contracts
 ```
 contracts/
-├── molbot-registry.clar      # NOVO
-├── molbot-payment.clar        # NOVO
-├── adapter-trait-v3.clar     # NOVO
-└── usdcx-adapter.clar        # NOVO
+├── molbot-registry.clar      # NEW
+├── molbot-payment.clar        # NEW
+├── adapter-trait-v3.clar     # NEW
+└── usdcx-adapter.clar        # NEW
 ```
 
 ### TypeScript
 ```
 src/
 ├── molbot/
-│   ├── types.ts              # NOVO
-│   ├── client.ts             # NOVO
-│   ├── index.ts              # NOVO
-│   ├── yield-optimizer.ts    # NOVO
-│   ├── content-generator.ts  # NOVO
-│   └── data-analyst.ts       # NOVO
+│   ├── types.ts              # NEW
+│   ├── client.ts             # NEW
+│   ├── index.ts              # NEW
+│   ├── yield-optimizer.ts    # NEW
+│   ├── content-generator.ts  # NEW
+│   └── data-analyst.ts       # NEW
 ├── protocols/
-│   └── usdcx.ts             # NOVO
+│   └── usdcx.ts             # NEW
 ├── x402/
-│   ├── enhanced-client.ts    # NOVO
-│   └── middleware.ts         # NOVO
+│   ├── enhanced-client.ts    # NEW
+│   └── middleware.ts         # NEW
 └── bot/handlers/
-    ├── usdcx.ts              # NOVO
-    ├── marketplace.ts        # NOVO
-    └── payments.ts           # NOVO
+    ├── usdcx.ts              # NEW
+    ├── marketplace.ts        # NEW
+    └── payments.ts           # NEW
 ```
 
 ---
 
-## ✅ CHECKLIST FINAL
+## Final Checklist
 
-- [ ] Molbot Registry deployed + testado
-- [ ] Molbot Payment deployed + testado
-- [ ] Molbot Client implementado
-- [ ] Yield Optimizer molbot funcionando
-- [ ] Content Generator molbot funcionando
-- [ ] USDCx integration completa
-- [ ] x402 enhanced payments funcionando
-- [ ] Marketplace no Telegram bot
-- [ ] Testes E2E passando
-- [ ] Demo para bounty submission
+- [ ] Molbot Registry deployed + tested
+- [ ] Molbot Payment deployed + tested
+- [ ] Molbot Client implemented
+- [ ] Yield Optimizer molbot working
+- [ ] Content Generator molbot working
+- [ ] USDCx integration complete
+- [ ] x402 enhanced payments working
+- [ ] Marketplace in Telegram bot
+- [ ] E2E tests passing
+- [ ] Demo for bounty submission
