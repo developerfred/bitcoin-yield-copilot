@@ -206,6 +206,100 @@ export function registerWithdrawHandler(bot: Bot<Context>) {
   // --------------------------------------------------------------------------
   // /withdraw - Inicia processo de saque
   // --------------------------------------------------------------------------
+  bot.command('withdraw', async (ctx) => {
+    const userId = String(ctx.from!.id);
+    const args = ctx.message?.text?.split(/\s+/).slice(1) ?? [];
+
+    // Parse amount
+    const amountStr = args[0];
+    const tokenArg = (args[1] ?? 'STX').toUpperCase();
+
+    if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
+      return ctx.reply(
+        `💸 *Withdraw STX*\n\n` +
+        `Usage: \`/withdraw <amount> [STX]\`\n` +
+        `Example: \`/withdraw 2 STX\`\n\n` +
+        `Set your withdrawal address first with /setwallet`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    const amount = parseFloat(amountStr);
+
+    // Only STX supported for now
+    if (tokenArg !== 'STX') {
+      return ctx.reply(
+        `❌ Only STX withdrawals are supported currently.\n` +
+        `Example: \`/withdraw 2 STX\``,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    try {
+      // Check wallet exists
+      const walletManager = await getWalletManager();
+      const record = walletManager.getCachedWallet(userId);
+
+      if (!record) {
+        return ctx.reply(
+          `❌ No contract wallet found.\n\nUse /start to create one first.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+      // Check withdrawal address is set
+      const destination = loadWithdrawalAddress(userId);
+      if (!destination) {
+        return ctx.reply(
+          `❌ *No withdrawal address set*\n\n` +
+          `Use /setwallet <your-stacks-address> first.\n` +
+          `Example: \`/setwallet ST1D1CNPSJK706QKW86NQ6MMCX7CHRSN0JQ1VANPD\``,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+      // Fetch live STX balance
+      const network = record.network as 'mainnet' | 'testnet';
+      const networkConfig = walletManager.getNetwork();
+      const balanceRes = await fetch(
+        `${networkConfig.apiUrl}/extended/v1/address/${record.contractAddress}/balances`
+      );
+      let stxBalance = 0;
+      if (balanceRes.ok) {
+        const data = await balanceRes.json() as { stx: { balance: string } };
+        stxBalance = Number(BigInt(data.stx?.balance || '0')) / STX_DECIMALS;
+      }
+
+      if (amount > stxBalance) {
+        return ctx.reply(
+          `❌ *Insufficient balance*\n\n` +
+          `Requested: ${amount} STX\n` +
+          `Available: ${stxBalance.toFixed(6)} STX`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+      // Build confirmation keyboard
+      // Callback data format: withdraw:confirm:<amount>:<destination>
+      const { InlineKeyboard } = await import('grammy');
+      const kb = new InlineKeyboard()
+        .text('✅ Confirm', `withdraw:confirm:${amount}:${destination}`)
+        .text('❌ Cancel', 'withdraw:cancel');
+
+      await ctx.reply(
+        `💸 *Confirm Withdrawal*\n\n` +
+        `Amount: *${amount} STX*\n` +
+        `To: \`${destination}\`\n` +
+        `From: \`${record.contractAddress}\`\n\n` +
+        `⚠️ This transaction cannot be reversed.`,
+        { parse_mode: 'Markdown', reply_markup: kb }
+      );
+
+    } catch (error: any) {
+      console.error('[withdraw] Error:', error);
+      await ctx.reply(`❌ Error preparing withdrawal: ${error.message}`);
+    }
+  });
 
   bot.callbackQuery(/withdraw:(confirm|cancel)/, async (ctx) => {
     console.log('[DEBUG callback] ===== CALLBACK RECEIVED =====');

@@ -12,6 +12,7 @@ export default defineConfig({
       'node_modules',
       'dist',
       'coverage',
+      'tests/*_test.ts', // Exclude clarinet tests - use vitest:clarinet
     ],
   },
   resolve: {

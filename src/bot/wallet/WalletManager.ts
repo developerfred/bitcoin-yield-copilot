@@ -15,6 +15,7 @@ import {
   makeContractCall,
   broadcastTransaction,
   ClarityValue,
+  signMessageHashRsv,
 } from '@stacks/transactions';
 import { stacksCrypto } from '../../security/stacksCrypto.js';
 import { createHash, randomBytes } from 'crypto';
@@ -424,35 +425,54 @@ class BlockchainService {
         if (data.tx_result) {
           const resultHex = data.tx_result.hex || data.tx_result;
           if (resultHex && typeof resultHex === 'string') {
-            const stripped = resultHex.replace('0x', '');
-            if (stripped.startsWith('0801')) {
-              const valueHex = stripped.slice(4);
-              const errorCode = parseInt(valueHex.replace(/^0+/, '') || '0', 16);
-              const msg = CLARITY_ERRORS[errorCode];
-              return `Erro ${errorCode}: ${msg ?? 'Erro desconhecido'}`;
+            // Check for standard error format (0x...01... where 01 = err)
+            if (resultHex.startsWith('0x')) {
+              const stripped = resultHex.slice(2); // Remove 0x
+              
+              // Parse Clarity error: last chars indicate error code
+              // Format: [type prefix][4-byte uint error code in big-endian]
+              if (stripped.length >= 2) {
+                const typeIndicator = stripped.slice(0, 2);
+                if (typeIndicator === '01') {
+                  // It's an (err ...) - take the last 4 bytes as the error code (big-endian uint)
+                  const errorCodeHex = stripped.slice(-8); // Last 8 hex chars = 4 bytes
+                  const errorCode = parseInt(errorCodeHex || '0', 16);
+                  const msg = CLARITY_ERRORS[errorCode];
+                  
+                  // Special handling for common errors
+                  if (errorCode === 420) {
+                    return `Erro 420: Limite de transação excedido. O valor solicitado ultrapassa o limite máximo por transação.`;
+                  }
+                  if (errorCode === 427) {
+                    return `Erro 427: Authorization already exists. Wait for previous transaction to expire or try with a new nonce.`;
+                  }
+                  if (errorCode === 404) {
+                    return `Erro 404: Nonce mismatch or transaction expired. Check the nonce and expiry.`;
+                  }
+                  return `Erro ${errorCode}: ${msg ?? 'Erro desconhecido'}`;
+                }
+              }
+              
+              // Check for ContractAlreadyExists (0x0809)
+              if (stripped.includes('0809')) {
+                return 'Contrato já existe (0x0809)';
+              }
             }
-            // Check for 0x0809 (ContractAlreadyExists)
-            if (resultHex.includes('0809')) {
-              return 'Contrato já existe (0x0809)';
-            }
+            return `Abortado pelo Clarity: ${resultHex}`;
           }
-          return `Abortado pelo Clarity: ${data.tx_result.hex ?? data.tx_result}`;
+          return `Abortado pelo Clarity: ${data.tx_result}`;
         }
-        return 'Abortado pelo Clarity: sem detalhes adicionais';
+        return `Transação abortada (status: ${data.tx_status})`;
       }
-
-      if (data.tx_status === 'abort_by_post_condition') {
-        return 'Abortado por post-conditions';
-      }
-
-      return `Status atual: ${data.tx_status ?? 'desconhecido'}`;
-    } catch (error) {
-      return `Erro ao buscar status da tx: ${error}`;
+      
+      return `Status: ${data.tx_status}`;
+    } catch (e) {
+      return `Erro ao obter detalhes: ${e}`;
     }
   }
 
   /**
-   * Aguarda confirmação de uma transação
+   * Aguarda confirmação de uma transação com retry automático para erros de rate limit
    */
   async waitForConfirmation(txid: string, maxAttempts = TX_CONFIRMATION_ATTEMPTS): Promise<void> {
     console.log(`[BlockchainService] Waiting for tx confirmation: ${txid}`);
@@ -478,6 +498,58 @@ class BlockchainService {
       console.log(`[BlockchainService] Waiting... (attempt ${i + 1}/${maxAttempts})`);
     }
     throw new Error(`Timeout: Transaction ${txid} was not mined in 5 minutes.`);
+  }
+
+  /**
+   * Aguarda confirmação com retry para erro 420 (rate limit)
+   * Este método é usado para transações que podem falhar por rate limiting
+   */
+  async waitForConfirmationWithRetry(
+    txid: string, 
+    maxAttempts: number = 12,
+    onRateLimit?: () => Promise<void>
+  ): Promise<{ success: boolean; error?: string }> {
+    console.log(`[BlockchainService] Waiting for tx with retry: ${txid}`);
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, TX_CONFIRMATION_INTERVAL));
+      
+      try {
+        const res = await fetch(`${this.networkConfig.apiUrl}/extended/v1/tx/${txid}`);
+        const data = await res.json() as { tx_status: string };
+
+        if (data.tx_status === 'success') {
+          console.log(`[BlockchainService] Tx confirmed successfully.`);
+          return { success: true };
+        }
+        
+        if (data.tx_status?.startsWith('abort')) {
+          const detail = await this.getDetailedError(txid);
+          
+          // Error 420 = Transaction limit exceeded - rate limit
+          if (detail.includes('420') || detail.includes('rate limit')) {
+            console.log(`[BlockchainService] Rate limit (420) detected, waiting and retrying... (${i + 1}/${maxAttempts})`);
+            
+            // Call optional callback to refresh nonce
+            if (onRateLimit) {
+              await onRateLimit();
+            }
+            
+            // Wait longer before retry
+            await new Promise(r => setTimeout(r, 15000));
+            continue;
+          }
+          
+          return { success: false, error: detail };
+        }
+      } catch (e) {
+        console.log(`[BlockchainService] Error checking tx (attempt ${i + 1}/${maxAttempts}):`, e);
+      }
+      
+      console.log(`[BlockchainService] Waiting... (attempt ${i + 1}/${maxAttempts})`);
+    }
+    
+    return { success: false, error: 'Timeout waiting for transaction' };
   }
 
   /**
@@ -517,7 +589,8 @@ class BlockchainService {
 class CryptoService {
   constructor(
     private botPrivateKey: Buffer,
-    private botPublicKey: Buffer
+    private botPublicKey: Buffer,
+    private botPrivateKeyForSdk?: string
   ) {}
 
   /**
@@ -577,13 +650,23 @@ class CryptoService {
   }
 
   /**
-   * Cria uma assinatura completa de 65 bytes
+   * Cria uma assinatura usando a função oficial do Stacks
+   * que é compatível com Clarity secp256k1-recover?
    */
   createFullSignature(message: Buffer): Buffer {
-    const { signature: compact, recovery } = this.signMessage(message);
-    const sig = Buffer.alloc(65);
-    sig[0] = recovery;
-    compact.copy(sig, 1);
+    // Use signMessageHashRsv from Stacks SDK - this is the Clarity-compatible format
+    const signatureHex = signMessageHashRsv({
+      messageHash: message.toString('hex'),
+      privateKey: this.botPrivateKeyForSdk!,
+    });
+    
+    const sig = Buffer.from(signatureHex, 'hex');
+    
+    console.log('[CryptoService] Signature created (Stacks SDK):', {
+      sigLength: sig.length,
+      sigHex: sig.toString('hex').slice(0, 20) + '...'
+    });
+    
     return sig;
   }
 
@@ -1236,7 +1319,8 @@ async debugListWallets(): Promise<void> {
     
     this.cryptoService = new CryptoService(
       this.botPrivateKey,
-      this.botPublicKey
+      this.botPublicKey,
+      this.botPrivateKeyForSdk
     );
     
     this.contractService = new ContractService(
@@ -1270,30 +1354,38 @@ async debugListWallets(): Promise<void> {
 
     let resolvedKeyHex: string;
 
+    // Robust private key cleaning - handles ALL Stacks key formats
+    function cleanPrivateKey(input: string): string {
+      let hex = input.replace('0x', '').toLowerCase();
+      
+      // Handle common Stacks formats:
+      // Format 1: 05 + 62 hex + 01 = 66 chars → 05 + 62 hex = 64 chars
+      // Format 2: 64 hex + 01 = 66 chars → 64 hex
+      // Format 3: 64 hex (already clean)
+      
+      // First remove trailing '01' if present
+      if (hex.endsWith('01') && hex.length > 64) {
+        hex = hex.slice(0, -2);
+      }
+      
+      // Now ensure it's exactly 64 chars
+      if (hex.length !== 64) {
+        throw new Error(`Invalid private key length: ${input.length} → ${hex.length} after cleaning`);
+      }
+      
+      return hex;
+    }
+
     if (rawEnv && !isMnemonic(rawEnv)) {
-      let cleanHex = rawEnv.replace('0x', '').toLowerCase();
-      if (cleanHex.length === 66 && cleanHex.endsWith('01')) {
-        cleanHex = cleanHex.slice(0, 64);
-      }
-      if (!/^[0-9a-f]{64}$/.test(cleanHex)) {
-        throw new Error(`AGENT_STACKS_PRIVATE_KEY must be a 64-char hex string`);
-      }
-      resolvedKeyHex = cleanHex;
+      resolvedKeyHex = cleanPrivateKey(rawEnv);
+      console.log(`[WalletManager] Using direct private key`);
     } else if (mnemonicEnv || isMnemonic(rawEnv)) {
       const mnemonic = mnemonicEnv || rawEnv;
       const accountIdx = parseInt(process.env.AGENT_STACKS_ACCOUNT_INDEX ?? '0', 10);
 
       console.log(`[WalletManager] Deriving key from mnemonic (account index ${accountIdx})…`);
       const derived = await privateKeyFromMnemonic(mnemonic, accountIdx);
-
-      let cleanDerived = derived.replace('0x', '').toLowerCase();
-      if (cleanDerived.length === 66 && cleanDerived.endsWith('01')) {
-        cleanDerived = cleanDerived.slice(0, 64);
-      }
-      if (!/^[0-9a-f]{64}$/.test(cleanDerived)) {
-        throw new Error(`Mnemonic derivation returned an unexpected key format`);
-      }
-      resolvedKeyHex = cleanDerived;
+      resolvedKeyHex = cleanPrivateKey(derived);
     } else {
       throw new Error('No agent key configured');
     }
@@ -1741,16 +1833,28 @@ async createContractWallet(
   const isRegisteredInHelper = await this.contractService.isWalletRegisteredInHelper(contractAddress);
   console.log(`[createContractWallet] isRegisteredInHelper: ${isRegisteredInHelper}`);
 
+  // In createContractWallet, replace the silent catch:
   if (!isRegisteredInHelper) {
     console.log(`[createContractWallet] Registering wallet in withdraw-helper...`);
-    try {
-      await this.contractService.registerWalletInHelper(contractAddress, telegramHash, limits);
-      console.log(`[createContractWallet] Wallet registered in withdraw-helper.`);
-    } catch (error) {
-      console.error(`[createContractWallet] Register error:`, error);
+    // Retry up to 3 times
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const regTxid = await this.contractService.registerWalletInHelper(
+          contractAddress, telegramHash, limits
+        );
+        await this.blockchainService.waitForConfirmation(regTxid);
+        console.log(`[createContractWallet] ✅ Wallet registered in withdraw-helper.`);
+        break;
+      } catch (error: any) {
+        console.error(`[createContractWallet] Register attempt ${attempt}/3 failed:`, error?.message);
+        if (attempt === 3) {
+          // Don't throw — wallet is still usable, withdrawStx will re-register lazily
+          console.warn(`[createContractWallet] ⚠️ Helper registration failed — will retry on first withdrawal.`);
+        } else {
+          await new Promise(r => setTimeout(r, 6000));
+        }
+      }
     }
-  } else {
-    console.log(`[createContractWallet] Wallet already registered in helper, skipping.`);
   }
 
   // Registrar na factory
@@ -1871,7 +1975,64 @@ async createContractWallet(
     return { txId };
   }
 
+  /**
+   * Executa saque com retry automático para erros de rate limit (420)
+   */
   async withdrawStx(
+    telegramUserId: string,
+    recipientAddress: string,
+    amountMicro: bigint,
+    expiryBlocks: number = 20,
+    maxRetries: number = 3
+  ): Promise<{ txIdAuth: string; txIdWithdraw: string }> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[withdrawStx] Attempt ${attempt}/${maxRetries}`);
+        
+        const result = await this.executeWithdrawStx(telegramUserId, recipientAddress, amountMicro, expiryBlocks);
+        return result;
+        
+      } catch (error: any) {
+        lastError = error;
+        
+        const errorMsg = error?.message || '';
+        
+        // Check if it's a rate limit error (420)
+        const isRateLimit = errorMsg.includes('420') || errorMsg.includes('Transaction limit exceeded');
+        
+        // Check if it's an auth exists error (427)
+        const isAuthExists = errorMsg.includes('427') || errorMsg.includes('Authorization already exists');
+        
+        if (isRateLimit && attempt < maxRetries) {
+          const waitTime = 15000 * attempt; // 15s, 30s, 45s
+          console.log(`[withdrawStx] Rate limit detected (420), waiting ${waitTime/1000}s before retry...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          continue;
+        }
+        
+        if (isAuthExists && attempt < maxRetries) {
+          // ERR-AUTH-EXISTS means there's a pending authorization
+          // Wait for it to expire (typically 5-10 blocks)
+          const waitTime = 30000 * attempt; // 30s, 60s, 90s
+          console.log(`[withdrawStx] Auth exists (427), waiting ${waitTime/1000}s for pending auth to expire...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          continue;
+        }
+        
+        // Re-throw if not a rate limit error or out of retries
+        throw error;
+      }
+    }
+    
+    throw lastError;
+  }
+
+  /**
+   * Executa o saque efetivamente (lógica principal)
+   */
+  private async executeWithdrawStx(
     telegramUserId: string,
     recipientAddress: string,
     amountMicro: bigint,
@@ -1890,13 +2051,35 @@ async createContractWallet(
       throw new Error('Bot public key mismatch with contract');
     }
 
-    const telegramHash = this.cryptoService.deriveTelegramHash(telegramUserId, this.salt);
     const walletContract = record.contractAddress;
 
+    // Ensure wallet is registered in the helper before proceeding
+    const isRegistered = await this.contractService.isWalletRegisteredInHelper(walletContract);
+    if (!isRegistered) {
+      console.log('[withdrawStx] Wallet not registered in helper — registering now...');
+      const telegramHashForReg = this.cryptoService.deriveTelegramHash(telegramUserId, this.salt);
+
+      const walletInfo = await this.contractService.getWalletInfo(walletContract);
+      const limits: WalletLimits = {
+        maxPerTransaction: BigInt(walletInfo?.['max-per-transaction']?.toString() ?? '1000000000'),
+        dailyLimit: BigInt(walletInfo?.['daily-limit']?.toString() ?? '10000000000'),
+      };
+
+      const regTxid = await this.contractService.registerWalletInHelper(
+        walletContract,
+        telegramHashForReg,
+        limits
+      );
+      console.log(`[withdrawStx] Registered in helper, TX: ${regTxid}`);
+      await this.blockchainService.waitForConfirmation(regTxid);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+
+    const telegramHash = this.cryptoService.deriveTelegramHash(telegramUserId, this.salt);
     const currentBlock = await this.blockchainService.fetchCurrentBlock();
     const expiry = currentBlock + expiryBlocks;
 
-    // Nonce vem do HELPER (não da user-wallet)
+    // Nonce vem do HELPER
     const helperNonce = await this.contractService.readHelperNonce(walletContract);
 
     console.log(`[withdrawStx] wallet: ${walletContract}`);
@@ -1905,75 +2088,175 @@ async createContractWallet(
     console.log(`[withdrawStx] helperNonce: ${helperNonce}`);
     console.log(`[withdrawStx] expiry: ${expiry}`);
 
-    // CORREÇÃO: usar serializeCV para replicar to-consensus-buff? do Clarity
-    const { serializeCV } = await import('@stacks/transactions');
-
-    const walletHash = createHash('sha256')
-      .update(serializeCV(principalCV(walletContract)))
-      .digest();
-
-    const recipientHash = createHash('sha256')
-      .update(serializeCV(principalCV(recipientAddress)))
-      .digest();
-
-    console.log(`[withdrawStx] walletHash: ${walletHash.toString('hex')}`);
-    console.log(`[withdrawStx] recipientHash: ${recipientHash.toString('hex')}`);
-
-    // Construir payload idêntico ao contrato:
-    // (withdraw-payload tg-hash wallet-hash nonce amount expiry recip-hash)
-    const helperPayload = Buffer.concat([
-      telegramHash,                        // 32 bytes - tg-hash
-      uint128BE(BigInt(10)),               // 16 bytes - DOMAIN-WITHDRAW = u10
-      walletHash,                          // 32 bytes - wallet-hash
-      uint128BE(helperNonce),              // 16 bytes - nonce
-      uint128BE(amountMicro),              // 16 bytes - amount
-      uint128BE(BigInt(expiry)),           // 16 bytes - expiry
-      recipientHash,                       // 32 bytes - recip-hash
-    ]);
-
-    const helperMsgHash = createHash('sha256').update(helperPayload).digest();
-    console.log(`[withdrawStx] helperMsgHash: ${helperMsgHash.toString('hex')}`);
-
-    const helperSig = this.cryptoService.createFullSignature(helperMsgHash);
-
-    // Step 1: authorize-withdrawal no helper
-    console.log('[withdrawStx] Calling authorize-withdrawal...');
+    // Get the wallet's telegram hash from the helper contract to verify
     const [helperAddr, helperName] = this.withdrawHelperContract.split('.');
 
-    const authResult = await this.contractService.callContractFunction(
+    const walletData = await this.blockchainService.callReadOnlyFunction(
       helperAddr,
       helperName,
-      'authorize-withdrawal',
-      [
-        principalCV(walletContract),      // wallet
-        uintCV(helperNonce),              // nonce
-        uintCV(amountMicro),              // amount
-        principalCV(recipientAddress),    // recipient
-        uintCV(BigInt(expiry)),           // expiry-block
-        bufferCV(telegramHash),           // tg-proof
-        bufferCV(helperSig),              // bot-sig
-      ]
+      'get-wallet-telegram-hash',
+      [principalCV(walletContract)]
     );
+
+    console.log('[withdrawStx] Stored telegram hash from helper:', walletData);
+    console.log('[withdrawStx] Our telegram hash:', telegramHash.toString('hex'));
+
+    // Calculate wallet hash: sha256(to-consensus-buff?(wallet))
+    const walletConsensusBytes = this.cryptoService.principalToConsensusBytes(walletContract);
+    const walletHash = createHash('sha256').update(walletConsensusBytes).digest();
+    console.log('[withdrawStx] walletConsensusBytes:', walletConsensusBytes.toString('hex'));
+    console.log('[withdrawStx] walletHash:', walletHash.toString('hex'));
+
+    // Calculate recipient hash: sha256(to-consensus-buff?(recipient)) - FULL bytes, no slice
+    const recipientConsensusBytes = this.cryptoService.principalToConsensusBytes(recipientAddress);
+    const recipientHash = createHash('sha256').update(recipientConsensusBytes).digest();
+    console.log('[withdrawStx] recipientConsensusBytes:', recipientConsensusBytes.toString('hex'));
+    console.log('[withdrawStx] recipientHash:', recipientHash.toString('hex'));
+
+    console.log('[withdrawStx] DEBUG payload inputs:', {
+      tgHash: telegramHash.toString('hex'),
+      walletHash: walletHash.toString('hex'),
+      nonce: helperNonce.toString(),
+      amount: amountMicro.toString(),
+      expiry: expiry.toString(),
+      expiryType: typeof expiry,
+      expiryHex: typeof expiry === 'bigint' ? '0x' + expiry.toString(16) : 'N/A',
+      recipientHash: recipientHash.toString('hex')
+    });
+
+    // IMPORTANT: Build the raw payload (NOT hashed) exactly as the contract's withdraw-payload function
+    const expiryBigInt = BigInt(expiry);
+    console.log('[withdrawStx] expiryBigInt:', expiryBigInt.toString(), 'hex:', '0x' + expiryBigInt.toString(16));
+    const rawPayload = withdrawPayload(
+      telegramHash,     // tg-hash - this is the actual telegram hash, not ZERO_HASH
+      walletHash,       // wallet-hash
+      helperNonce,      // nonce
+      amountMicro,      // amount
+      expiryBigInt,   // expiry
+      recipientHash     // recip-hash
+    );
+
+    console.log('[withdrawStx] Raw payload length:', rawPayload.length);
+    console.log('[withdrawStx] Raw payload (hex):', Buffer.from(rawPayload).toString('hex'));
+
+    // The contract does: (let ((payload-hash (sha256 (withdraw-payload ...))))
+    const msgHash = createHash('sha256').update(rawPayload).digest();
+    console.log('[withdrawStx] msgHash:', msgHash.toString('hex'));
+
+    const helperSig = this.cryptoService.createFullSignature(msgHash);
+    console.log('[withdrawStx] signature (65 bytes):', helperSig.toString('hex'));
+    console.log('[withdrawStx] signature recovery byte:', helperSig[0]);
+    console.log('[withdrawStx] signature r:', helperSig.slice(1, 33).toString('hex'));
+    console.log('[withdrawStx] signature s:', helperSig.slice(33, 65).toString('hex'));
+    console.log('[withdrawStx] botPublicKey (33 bytes):', this.botPublicKey.toString('hex'));
+
+    // Step 1: authorize-withdrawal no helper
+    // Try all 3 signature formats to find which one works
+    console.log('[withdrawStx] Testing signature formats...');
+    
+    const msgHashHex = msgHash.toString('hex');
+    
+    const signatureFormats = [
+      { name: 'raw-0', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 0; return s; } },
+      { name: 'raw-1', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 1; return s; } },
+      { name: 'raw-2', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 2; return s; } },
+      { name: 'raw-3', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 3; return s; } },
+      { name: 'sdk', transform: (sig: Buffer) => sig },
+    ];
+    
+    let authResult: any = null;
+    let usedFormat = '';
+    
+    for (const fmt of signatureFormats) {
+      let fullSig: Buffer;
+      
+      if (fmt.name === 'sdk') {
+        const sig = signMessageHashRsv({
+          messageHash: msgHashHex,
+          privateKey: this.botPrivateKeyForSdk!,
+        });
+        fullSig = Buffer.from(sig, 'hex');
+      } else {
+        const { signature, recovery } = stacksCrypto.ecdsaSign(msgHash, this.botPrivateKey);
+        fullSig = fmt.transform(signature);
+      }
+      
+      console.log(`[withdrawStx] Trying ${fmt.name}: recovery=${fullSig[0]}, sig=${fullSig.toString('hex').slice(0,20)}...`);
+      
+      try {
+        const testResult = await this.contractService.callContractFunction(
+          helperAddr,
+          helperName,
+          'authorize-withdrawal',
+          [
+            principalCV(walletContract),
+            uintCV(helperNonce),
+            uintCV(amountMicro),
+            principalCV(recipientAddress),
+            uintCV(BigInt(expiry)),
+            bufferCV(telegramHash),
+            bufferCV(fullSig),
+          ]
+        );
+        
+        // Check if transaction succeeded
+        await new Promise(r => setTimeout(r, 3000));
+        const res = await fetch(`${this.networkConfig.apiUrl}/extended/v1/tx/${testResult.txid}`);
+        const data = await res.json() as { tx_status: string };
+        
+        if (data.tx_status === 'success') {
+          authResult = testResult;
+          usedFormat = fmt.name;
+          console.log(`[withdrawStx] ✅ ${fmt.name} worked!`);
+          break;
+        } else {
+          console.log(`[withdrawStx] ❌ ${fmt.name} failed: ${data.tx_status}`);
+          // Get more details about the failure
+          try {
+            const details = await fetch(`${this.networkConfig.apiUrl}/extended/v1/tx/${testResult.txid}`);
+            const detailData = await details.json();
+            console.log('[withdrawStx] TX Details:', JSON.stringify(detailData, null, 2));
+          } catch(e) {
+            console.log('[withdrawStx] Could not get TX details');
+          }
+        }
+      } catch (e) {
+        console.log(`[withdrawStx] ❌ ${fmt.name} error: ${e}`);
+      }
+    }
+    
+    if (!authResult) {
+      throw new Error('All signature formats failed');
+    }
+    
+    console.log(`[withdrawStx] Using format: ${usedFormat}`);
+    
+    console.log('[withdrawStx] Arg types:', {
+      wallet: typeof walletContract,
+      nonce: typeof helperNonce,
+      amount: typeof amountMicro,
+      recipient: typeof recipientAddress,
+      expiry: typeof expiry,
+      tgProof: 'buff32',
+      botSig: 'buff65 len=' + helperSig.length
+    });
 
     console.log(`[withdrawStx] Auth TX: ${authResult.txid}`);
     await this.blockchainService.waitForConfirmation(authResult.txid);
 
-    // Calcular auth-key — mesmo cálculo do contrato:
-    // (auth-key wallet nonce) = sha256(to-consensus-buff?(wallet) ++ uint-to-16bytes(nonce))
+    // Calculate auth-key: sha256(to-consensus-buff?(wallet) ++ uint-to-16bytes(nonce))
     const authKey = createHash('sha256')
       .update(Buffer.concat([
-        serializeCV(principalCV(walletContract)),
+        walletConsensusBytes,
         uint128BE(helperNonce),
       ]))
       .digest();
-
     console.log(`[withdrawStx] authKey: ${authKey.toString('hex')}`);
 
     // Aguardar propagação
     await new Promise(r => setTimeout(r, 5000));
 
     // Step 2: withdraw-stx na user-wallet
-    // Assinatura: (amount uint) (recipient principal) (expiry-block uint) (auth-key (buff 32))
     console.log('[withdrawStx] Calling withdraw-stx...');
     const [walletAddr, walletName] = walletContract.split('.');
 

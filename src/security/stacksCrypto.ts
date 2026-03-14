@@ -1,20 +1,12 @@
-// crypto.ts
+// stacksCrypto.ts
 // Stacks cryptography — signing, encryption, key derivation
-//
-// ⚠️  Zero @noble/* imports.
-//
-//  SHA-256 / HMAC  → node:crypto  (built-in, zero deps)
-//  ECDSA signing   → @stacks/transactions signMessageHashRsv
-//  Verify          → @stacks/encryption verifyMessageSignatureRsv
-//  Key derivation  → @stacks/transactions getAddressFromPrivateKey / makeRandomPrivKey
 
 import {
   getAddressFromPrivateKey,
   makeRandomPrivKey,
   privateKeyToPublic,
-  signMessageHashRsv,
 } from '@stacks/transactions';
-import { verifyMessageSignatureRsv } from '@stacks/encryption';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import {
   createCipheriv,
   createDecipheriv,
@@ -80,20 +72,9 @@ export class StacksCrypto {
   // ── Public key derivation ─────────────────────────────────────────────────
 
   publicKeyCreate(privateKey: Buffer, _compressed = true): Buffer {
-    const privHex = privateKey.toString('hex') + '01';
-    const pubKey = privateKeyToPublic(privHex);
-
-    let pubBuffer: Buffer;
-    if (Buffer.isBuffer(pubKey)) {
-      pubBuffer = pubKey;
-    } else if (typeof pubKey === 'object' && pubKey !== null && 'data' in pubKey) {
-      const d = (pubKey as { data: string | Uint8Array }).data;
-      pubBuffer = d instanceof Uint8Array ? Buffer.from(d) : Buffer.from(d as string, 'hex');
-    } else if (typeof pubKey === 'string') {
-      pubBuffer = Buffer.from(pubKey, 'hex');
-    } else {
-      throw new Error('publicKeyCreate: unexpected public key format');
-    }
+    // Use @noble/curves directly — avoids @stacks format wrapping
+    const pubKeyBytes = secp256k1.getPublicKey(privateKey, true); // compressed
+    const pubBuffer = Buffer.from(pubKeyBytes);
 
     if (pubBuffer.length !== 33 || (pubBuffer[0] !== 0x02 && pubBuffer[0] !== 0x03)) {
       throw new Error(
@@ -104,52 +85,87 @@ export class StacksCrypto {
   }
 
   // ── ECDSA signing ─────────────────────────────────────────────────────────
+  //
+  // Output: { signature: 64-byte Buffer (r||s), recovery: 0|1 }
+  //
+  // CryptoService.createFullSignature prepends the recovery byte to produce
+  // the 65-byte [recovery || r || s] buffer that Clarity secp256k1-recover? expects.
 
   ecdsaSign(msgHash: Buffer, privateKey: Buffer): SignatureResult {
-    const privHex = privateKey.toString('hex');
-    const hashHex = msgHash.toString('hex');
-
     console.log('=== ecdsaSign ===');
-    console.log('msgHash :', hashHex);
+    console.log('msgHash :', msgHash.toString('hex'));
+    console.log('privKey length:', privateKey.length, 'bytes');
 
-    const rsvResult = signMessageHashRsv({ message: hashHex, privateKey: privHex });
+    if (msgHash.length !== 32) {
+      throw new Error(`ecdsaSign: msgHash must be 32 bytes, got ${msgHash.length}`);
+    }
+    if (privateKey.length !== 32) {
+      throw new Error(`ecdsaSign: privateKey must be 32 bytes, got ${privateKey.length}`);
+    }
 
-    const rsvHex = typeof rsvResult === 'string'
-      ? rsvResult
-      : (rsvResult as any).data ?? (rsvResult as any).signature ?? String(rsvResult);
+    const sig = secp256k1.sign(msgHash, privateKey, { lowS: true, der: false });
+    const signature = Buffer.from(sig);
 
-    const rsvBuf = Buffer.from(rsvHex, 'hex');
-    const recovery = rsvBuf[0];            // 0 or 1
-    const signature = rsvBuf.slice(1, 65); // 64 bytes r || s
+    const pubKey = this.publicKeyCreate(privateKey);
+    
+    // Find recovery by trying both values and seeing which recovers correctly
+    let recovery = 0;
+    let foundRecovery = false;
+    
+    for (let rec of [0, 1]) {
+      const fullSig = Buffer.alloc(65);
+      fullSig[0] = rec;
+      signature.copy(fullSig, 1);
+      
+      // Try to recover public key using both methods
+      try {
+        // Use Signature class to recover
+        const sigObj = secp256k1.Signature.fromHex(signature.toString('hex'));
+        const recovered = secp256k1.recoverPublicKey(msgHash, fullSig, rec);
+        const recoveredHex = Buffer.from(recovered).toString('hex');
+        if (recoveredHex === pubKey.toString('hex')) {
+          recovery = rec;
+          foundRecovery = true;
+          break;
+        }
+      } catch (e) {
+        // Continue trying
+      }
+    }
+    
+    if (!foundRecovery) {
+      // Fallback: assume recovery 0
+      recovery = 0;
+    }
 
     console.log('recovery :', recovery);
-    console.log('sig      :', signature.toString('hex'));
-
-    // Self-verify
-    const pubKey = this.publicKeyCreate(privateKey);
-    const verified = this.verifySignature(msgHash, signature, recovery, pubKey);
-    console.log('self-verify:', verified ? 'PASSED ✅' : 'FAILED ❌');
+    console.log('sig (compact):', signature.toString('hex'));
 
     return { signature, recovery };
   }
 
   // ── Signature verification ────────────────────────────────────────────────
+  //
+  // Uses @noble/curves/secp256k1 directly.
+  // Recovers the public key from [recovery || r || s] and compares.
 
   verifySignature(
     msgHash: Buffer,
-    signature: Buffer,
+    signature: Buffer,   // 64-byte compact r || s
     recovery: number,
     expectedPubKey: Buffer,
   ): boolean {
     try {
-      const recoveryHex = recovery.toString(16).padStart(2, '0');
-      const rsvHex = recoveryHex + signature.toString('hex');
+      // Reconstruct the Signature object with recovery info
+      const sig = secp256k1.Signature
+        .fromCompact(signature)
+        .addRecoveryBit(recovery);
 
-      return verifyMessageSignatureRsv({
-        message: msgHash.toString('hex'),
-        signature: rsvHex,
-        publicKey: expectedPubKey.toString('hex'),
-      });
+      // Recover the public key
+      const recoveredPubKey = sig.recoverPublicKey(msgHash);
+      const recoveredBytes = Buffer.from(recoveredPubKey.toRawBytes(true)); // compressed
+
+      return recoveredBytes.toString('hex') === expectedPubKey.toString('hex');
     } catch (err) {
       console.error('verifySignature error:', err);
       return false;

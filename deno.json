@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "imports": {
+    "clarinet/": "https://deno.land/x/clarinet@v1.7.1/",
+    "@std/assert": "https://deno.land/std@0.208.0/assert/"
+  },
+  "tasks": {
+    "test": "deno test --allow-all --no-check tests/",
+    "test:watch": "deno test --allow-all --no-check --watch tests/",
+    "clarinet": "clarinet"
+  },
+  "lint": {
+    "include": ["tests/"],
+    "exclude": ["tests/**/*_clarinet.ts"],
+    "rules": {
+      "tags": ["recommended"],
+      "include": ["ban-untagged-todo"],
+      "exclude": ["no-unused-vars"]
+    }
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 80,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": true,
+    "proseWrap": "preserve",
+    "include": ["tests/"],
+    "exclude": ["tests/deps.ts"]
+  },
+  "test": {
+    "include": ["tests/"],
+    "exclude": ["tests/deps.ts"]
+  }
+}

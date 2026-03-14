@@ -12,6 +12,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
+    "test:contracts": "node scripts/test-runner.cjs",
+    "test:clarinet": "node scripts/test-runner.cjs",
+    "test:clarinet:watch": "vitest --config vitest.clarinet.config.ts --watch",
+    "test:clarinet:coverage": "vitest --config vitest.clarinet.config.ts --coverage",
     "lint": "eslint src --ext .ts",
     "prepare": "husky"
   },
@@ -34,6 +38,7 @@
     "@noble/secp256k1": "^3.0.0",
     "@scure/bip39": "^2.0.1",
     "@scure/btc-signer": "^2.0.1",
+    "@stacks/clarinet-sdk": "^3.8.1",
     "@stacks/connect": "^8.2.5",
     "@stacks/encryption": "^7.3.1",
     "@stacks/network": "^7.3.1",
@@ -67,13 +72,13 @@
     "husky": "^9.1.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^3.0.4"
+    "vitest": "2",
+    "vitest-environment-clarinet": "^3.0.2"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "overrides": {
-    "@noble/hashes": "1.4.0",
-    "@noble/curves": "1.6.0"
+    "strip-ansi": "^7.0.1"
   }
 }

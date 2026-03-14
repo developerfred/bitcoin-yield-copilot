@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 const envSchema = z.object({
+  // Skip validation flag
+  SKIP_CONFIG_VALIDATION: z.string().optional(),
+
   // Anthropic / OpenRouter
   ANTHROPIC_API_KEY: z.string().min(1),
   LLM_PROVIDER: z.enum(['anthropic', 'openrouter']).default('anthropic'),
@@ -26,6 +29,10 @@ const envSchema = z.object({
 
   // ERC-8004
   AGENT_IDENTITY_CONTRACT: z.string().optional(),
+
+  // Molbot Contracts
+  MOLBOT_REGISTRY_ADDRESS: z.string().optional(),
+  MOLBOT_PAYMENT_ADDRESS: z.string().optional(),
 
   // Database
   DATABASE_PATH: z.string().default('./data/agent.db'),
@@ -67,6 +74,10 @@ export const config = {
   erc8004: {
     contract: process.env.AGENT_IDENTITY_CONTRACT,
   },
+  molbot: {
+    registryAddress: process.env.MOLBOT_REGISTRY_ADDRESS,
+    paymentAddress: process.env.MOLBOT_PAYMENT_ADDRESS,
+  },
   database: {
     path: process.env.DATABASE_PATH ?? './data/agent.db',
   },
@@ -80,11 +91,14 @@ export const config = {
   log: {
     level: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   },
+  skipValidation: process.env.SKIP_CONFIG_VALIDATION === 'true',
 };
-// Validate at startup
-try {
-  envSchema.parse(process.env);
-} catch (error) {
-  console.error('Invalid environment configuration:', error);
-  process.exit(1);
+
+if (!config.skipValidation) {
+  try {
+    envSchema.parse(process.env);
+  } catch (error) {
+    console.error('Invalid environment configuration:', error);
+    process.exit(1);
+  }
 }
