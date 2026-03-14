@@ -2,46 +2,49 @@
 
 Este diretório contém testes unitários e de integração para os contratos Clarity do Bitcoin Yield Copilot.
 
-## 📋 Requisitos
+## 📋 Versões Suportadas
 
-- [Clarinet](https://github.com/hirosystems/clarinet) instalado
-- Deno (para executar testes TypeScript)
+- **Clarinet 1.x/2.x**: Use `clarinet test`
+- **Clarinet 3.x**: Use `bun test:clarinet`
 
 ## 🚀 Comandos
 
 ### Verificar sintaxe dos contratos
 ```bash
 clarinet check
+# ou
+bunx clarinet check
 ```
 
-### Executar todos os testes
+### Executar testes (Clarinet 1.x/2.x)
 ```bash
 clarinet test
 ```
 
-### Executar testes específicos
+### Executar testes (Clarinet 3.x)
 ```bash
-# Testes do ALEX Adapter
-clarinet test --filter alex-adapter
-
-# Testes com output detalhado
-clarinet test --coverage
+bun test:clarinet
+bun test:clarinet:watch    # modo watch
+bun test:clarinet:coverage  # com coverage
 ```
 
 ### Testar contra testnet
 ```bash
 # Console interativo na testnet
 clarinet console --testnet
+
+# Console interativo local
+clarinet console
 ```
 
-## 📁 Estrutura
+## 📁 Estrutura dos Testes
 
 ```
 tests/
-├── alex-adapter-testnet-v2_test.ts    # Testes do ALEX Adapter
-├── user-wallet_test.ts                 # Testes da User Wallet (TODO)
-├── wallet-factory_test.ts              # Testes da Wallet Factory (TODO)
-└── README.md                           # Este arquivo
+├── *_test.ts              # Testes Clarinet (legacy format)
+├── *.test.ts              # Testes TypeScript/Vitest
+├── deps.ts                # Dependências compartilhadas
+└── README.md              # Este arquivo
 ```
 
 ## 🔧 Configuração
@@ -49,6 +52,15 @@ tests/
 O arquivo `Clarinet.toml` está configurado com:
 - **Production contracts**: Contratos reais do projeto
 - **Mock contracts**: Simulações de protocolos externos (ALEX) para testes
+
+### Arquivos de Configuração
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `Clarinet.toml` | Configuração dos contratos |
+| `vitest.config.ts` | Configuração Vitest (TypeScript) |
+| `vitest.clarinet.config.ts` | Configuração Vitest (Clarinet) |
+| `deno.json` | Configuração Deno |
 
 ## 🧪 Mock Contracts
 
@@ -61,10 +73,10 @@ Para testar sem depender da rede:
 | `mock-alex-fixed-pool.clar` | Simulação do pool de liquidez da ALEX |
 | `mock-alex-vault.clar` | Simulação do vault da ALEX |
 
-## 📝 Escrevendo Novos Testes
+## 📝 Escrevendo Novos Testes (Clarinet 3.x)
 
 ```typescript
-import { Clarinet, Tx, Chain, Account, types } from 'https://deno.land/x/clarinet@v1.5.4/index.ts';
+import { Clarinet, Tx, Chain, types } from './deps.ts';
 
 Clarinet.test({
   name: 'Descrição do teste',
@@ -80,9 +92,22 @@ Clarinet.test({
 });
 ```
 
+## ⚠️ Notas Importantes
+
+### Clarinet 3.x
+- O comando `clarinet test` foi removido
+- Use Vitest com `vitest-environment-clarinet`
+- Execute: `bun test:clarinet`
+
+### Problemas Conhecidos
+
+1. **npm install falha**: Use `bun install` ao invés de `npm install`
+2. **Testes não rodam com Deno**: Use Vitest com Clarinet SDK
+3. **Tipo de retorno不一致**: Certifique-se que todas as branches retornam o mesmo tipo
+
 ## 🐛 Debug
 
 Habilite logs detalhados:
 ```bash
-DEBUG=1 clarinet test
+DEBUG=1 bun test:clarinet
 ```
