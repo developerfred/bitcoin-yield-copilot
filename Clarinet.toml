@@ -68,6 +68,33 @@ path = "contracts/mocks/mock-alex-vault.clar"
 clarity_version = 3
 epoch = 3.1
 
+[contracts.erc8004-identity]
+path = "contracts/erc8004-identity.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.molbot-registry]
+path = "contracts/molbot-registry.clar"
+clarity_version = 3
+epoch = 3.1
+
+[contracts.molbot-payment]
+path = "contracts/molbot-payment.clar"
+depends_on = ["molbot-registry", "mock-sip-010"]
+clarity_version = 3
+epoch = 3.1
+
+[contracts.usdcx-adapter]
+path = "contracts/usdcx-adapter.clar"
+depends_on = ["adapter-trait", "user-wallet", "mock-sip-010"]
+clarity_version = 3
+epoch = 3.1
+
+[contracts.adapter-trait-v3]
+path = "contracts/adapter-trait-v3.clar"
+clarity_version = 3
+epoch = 3.1
+
 [repl.settings]
 analysis = ["check_checker", "costs"]
 passes = ["check_checker", "costs"]
