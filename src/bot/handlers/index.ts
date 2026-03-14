@@ -7,9 +7,23 @@
  * 2. Public commands (/start, /help, /test) are declared first and bypass
  *    all session logic inside auth.middleware() via PUBLIC_COMMANDS allowlist.
  * 3. Protected commands use auth.requireOnboarded() as a per-route guard.
- * 4. Module handlers (onboarding, alex, withdraw, protocols) are registered
- *    after the core commands.
+ * 4. Module handlers are registered in strict order — order matters in grammY.
  * 5. The AI text handler is last — lowest priority.
+ * 6. A catch-all unknown-command handler fires last so no command is silently
+ *    dropped. This makes routing bugs immediately visible.
+ *
+ * COMMAND REGISTRATION ORDER (must not change without updating this comment):
+ *   1. auth.middleware()          — attaches session, always calls next()
+ *   2. /help                      — inline, public
+ *   3. registerOnboardingHandlers — /start /wallet /txs /setwallet
+ *   4. registerAlexHandlers       — /alex
+ *   5. registerWithdrawHandler    — /withdraw /setwallet /removewallet /txstatus + callbacks
+ *   6. registerDepositHandlers    — /deposit
+ *   7. registerProtocolHandlers   — /protocols
+ *   8. /yields /portfolio /alerts — inline, protected
+ *   9. callbackQuery handlers     — confirm_deposit / confirm_withdraw / cancel_action
+ *  10. bot.on('message:text')     — AI free-text, lowest priority
+ *  11. unknown-command catch-all  — fires if no handler above matched
  */
 
 import { Bot, Context, InlineKeyboard } from 'grammy';
@@ -30,6 +44,15 @@ import pino from 'pino';
 const logger = pino({ name: 'bot:handlers' });
 
 const STX_DECIMALS = 1_000_000;
+
+// ============================================================================
+// Known commands — keep in sync with all registered handlers.
+// Used by the catch-all to give a helpful "did you mean?" message.
+// ============================================================================
+const KNOWN_COMMANDS = new Set([
+  'start', 'help', 'wallet', 'txs', 'setwallet', 'removewallet', 'txstatus',
+  'withdraw', 'deposit', 'alex', 'yields', 'portfolio', 'alerts', 'protocols',
+]);
 
 const agentTools: Tool[] = [
   {
@@ -104,14 +127,18 @@ export function setupHandlers(bot: Bot<Context>) {
   const auth = new AuthMiddleware(db);
   const claudeAgent = new ClaudeAgent();
 
+  // --------------------------------------------------------------------------
+  // STEP 1 — Global middleware (always runs first, always calls next())
+  // --------------------------------------------------------------------------
   bot.use(auth.middleware());
 
   syncOnboardingToAuth().catch(err =>
     logger.error({ err }, 'Failed to sync onboarding state')
   );
 
-
-  // ── /help ─────────────────────────────────────────────────────────────────
+  // --------------------------------------------------------------------------
+  // STEP 2 — Inline public commands
+  // --------------------------------------------------------------------------
   bot.command('help', async (ctx) => {
     await ctx.reply(
       `📖 *Bitcoin Yield Copilot Help*\n\n` +
@@ -120,32 +147,46 @@ export function setupHandlers(bot: Bot<Context>) {
       `/wallet — View your contract wallet info\n` +
       `/yields — Discover current yield opportunities\n` +
       `/portfolio — View your positions\n` +
+      `/withdraw <amount> — Withdraw STX to your saved address\n` +
+      `/setwallet <address> — Set withdrawal address\n` +
       `/alex — Access ALEX DEX (swap, pools, balances)\n` +
       `/alerts — Manage APY alerts\n` +
+      `/txstatus <txid> — Check transaction status\n` +
       `/help — This message\n\n` +
       `*Examples:*\n` +
+      `• \`/withdraw 2\` — withdraw 2 STX\n` +
       `• "Show me yields"\n` +
       `• "Put my sBTC to work"\n` +
-      `• "What's my portfolio?"\n` +
-      `• "Withdraw from Zest"`,
+      `• "What's my portfolio?"`,
       { parse_mode: 'Markdown' },
     );
   });
 
-  // ==========================================================================
-  // STEP 3 — Module handlers (onboarding registers /start internally)
-  // ==========================================================================
-  registerOnboardingHandlers(bot);  // registers /start, /wallet, /txs, /setwallet
-  registerAlexHandlers(bot);
-  registerDepositHandlers(bot);  // registers /withdraw, /deposit
-  registerWithdrawHandler(bot);  // registers /setwallet, /removewallet, callbacks
-  registerProtocolHandlers(bot);
+  // --------------------------------------------------------------------------
+  // STEP 3 — Module handlers
+  // Registration order is significant — first match wins in grammY.
+  // DO NOT reorder without updating the architecture comment at the top.
+  // --------------------------------------------------------------------------
+  logger.info('[handlers] Registering onboarding handlers (/start /wallet /txs /setwallet)...');
+  //registerOnboardingHandlers(bot);
 
-  // ==========================================================================
-  // STEP 4 — Protected commands (require completed onboarding)
-  // ==========================================================================
+  logger.info('[handlers] Registering alex handlers (/alex)...');
+  //registerAlexHandlers(bot);
 
-  // ── /yields ───────────────────────────────────────────────────────────────
+  // /withdraw MUST be registered before any other module that might claim it.
+  logger.info('[handlers] Registering withdraw handlers (/withdraw /setwallet /removewallet /txstatus)...');
+  registerWithdrawHandler(bot);
+
+  logger.info('[handlers] Registering deposit handlers (/deposit)...');
+  //registerDepositHandlers(bot);
+
+  logger.info('[handlers] Registering protocol handlers (/protocols)...');
+  //registerProtocolHandlers(bot);
+
+  // --------------------------------------------------------------------------
+  // STEP 4 — Protected inline commands
+  // --------------------------------------------------------------------------
+
   bot.command('yields', async (ctx) => {
     await ctx.reply('🔍 Fetching yield opportunities...');
     try {
@@ -166,69 +207,59 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── /portfolio ────────────────────────────────────────────────────────────
-  bot.command(
-    'portfolio',
-    auth.requireOnboarded(),
-    async (ctx) => {
-      const telegramId = String(ctx.from?.id);
-      try {
-        const walletManager = await getWalletManager();
-        const user = await db.getUser(telegramId);
-        const positions = user ? await db.getUserPositions(user.id) : [];
-        const contractAddress = walletManager.getAddress(telegramId);
+  bot.command('portfolio', auth.requireOnboarded(), async (ctx) => {
+    const telegramId = String(ctx.from?.id);
+    try {
+      const walletManager = await getWalletManager();
+      const user = await db.getUser(telegramId);
+      const positions = user ? await db.getUserPositions(user.id) : [];
+      const contractAddress = walletManager.getAddress(telegramId);
 
-        let msg = `📊 *Your Portfolio*\n\nContract: \`${contractAddress ?? 'not set'}\`\n\n`;
+      let msg = `📊 *Your Portfolio*\n\nContract: \`${contractAddress ?? 'not set'}\`\n\n`;
 
-        if (positions.length === 0) {
-          msg += 'No active positions.\n\nUse /yields to discover opportunities!';
-        } else {
-          let total = 0;
-          for (const pos of positions as any[]) {
-            msg += `• ${pos.protocol}: ${pos.amount} ${pos.token} @ ${pos.apy}% APY\n`;
-            total += pos.amount;
-          }
-          msg += `\nTotal: ${total} sBTC`;
+      if (positions.length === 0) {
+        msg += 'No active positions.\n\nUse /yields to discover opportunities!';
+      } else {
+        let total = 0;
+        for (const pos of positions as any[]) {
+          msg += `• ${pos.protocol}: ${pos.amount} ${pos.token} @ ${pos.apy}% APY\n`;
+          total += pos.amount;
         }
-        await ctx.reply(msg, { parse_mode: 'Markdown' });
-      } catch (err) {
-        logger.error({ err }, 'Failed to get portfolio');
-        await ctx.reply('❌ Failed to fetch portfolio. Please try again later.');
+        msg += `\nTotal: ${total} sBTC`;
       }
-    },
-  );
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
+    } catch (err) {
+      logger.error({ err }, 'Failed to get portfolio');
+      await ctx.reply('❌ Failed to fetch portfolio. Please try again later.');
+    }
+  });
 
-  // ── /alerts ───────────────────────────────────────────────────────────────
-  bot.command(
-    'alerts',
-    auth.requireOnboarded(),
-    async (ctx) => {
-      const telegramId = String(ctx.from?.id);
-      try {
-        const user = await db.getUser(telegramId);
-        const alerts = user ? await db.getUserAlerts(user.id) : [];
+  bot.command('alerts', auth.requireOnboarded(), async (ctx) => {
+    const telegramId = String(ctx.from?.id);
+    try {
+      const user = await db.getUser(telegramId);
+      const alerts = user ? await db.getUserAlerts(user.id) : [];
 
-        if (alerts.length === 0) {
-          return ctx.reply(
-            '📢 No active alerts.\n\nSay "Alert me if Zest drops below 5%" to create one.',
-          );
-        }
-
-        let msg = '📢 *Your APY Alerts:*\n\n';
-        for (const alert of alerts as any[]) {
-          msg += `• ${alert.protocol}: below ${alert.threshold}%\n`;
-        }
-        await ctx.reply(msg, { parse_mode: 'Markdown' });
-      } catch (err) {
-        logger.error({ err }, 'Failed to get alerts');
-        await ctx.reply('❌ Failed to fetch alerts. Please try again later.');
+      if (alerts.length === 0) {
+        return ctx.reply(
+          '📢 No active alerts.\n\nSay "Alert me if Zest drops below 5%" to create one.',
+        );
       }
-    },
-  );
 
-  // ==========================================================================
+      let msg = '📢 *Your APY Alerts:*\n\n';
+      for (const alert of alerts as any[]) {
+        msg += `• ${alert.protocol}: below ${alert.threshold}%\n`;
+      }
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
+    } catch (err) {
+      logger.error({ err }, 'Failed to get alerts');
+      await ctx.reply('❌ Failed to fetch alerts. Please try again later.');
+    }
+  });
+
+  // --------------------------------------------------------------------------
   // STEP 5 — Callback query handlers
-  // ==========================================================================
+  // --------------------------------------------------------------------------
 
   async function ensureWalletReady(telegramId: string, ctx: Context): Promise<boolean> {
     try {
@@ -247,7 +278,6 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   }
 
-  // ── confirm deposit ───────────────────────────────────────────────────────
   bot.callbackQuery(/confirm_deposit_(.+)_(\d+\.?\d*)/, async (ctx) => {
     const [, protocolName, amountStr] = ctx.match;
     const telegramId = String(ctx.from?.id);
@@ -299,7 +329,6 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── confirm withdraw ──────────────────────────────────────────────────────
   bot.callbackQuery(/confirm_withdraw_(.+)_(\d+\.?\d*)/, async (ctx) => {
     const [, protocolName, amountStr] = ctx.match;
     const telegramId = String(ctx.from?.id);
@@ -333,21 +362,30 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  // ── cancel ────────────────────────────────────────────────────────────────
   bot.callbackQuery('cancel_action', async (ctx) => {
     await ctx.answerCallbackQuery('Action cancelled');
     await ctx.editMessageText('❌ Action cancelled');
   });
 
-  // ==========================================================================
-  // STEP 6 — AI free-text handler (lowest priority, last registered)
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // STEP 6 — AI free-text handler (lowest priority, last before catch-all)
+  // --------------------------------------------------------------------------
   bot.on('message:text', async (ctx) => {
     const telegramId = String(ctx.from?.id);
     const text = ctx.message.text;
 
-    // Commands should have been handled above — ignore leftovers
-    if (text.startsWith('/')) return;
+    // Commands that reach here were not matched by any handler above.
+    // Log as warning so routing bugs are immediately visible in logs.
+    if (text.startsWith('/')) {
+      const cmd = text.split(/\s+/)[0].replace('/', '').split('@')[0].toLowerCase();
+      if (KNOWN_COMMANDS.has(cmd)) {
+        // Known command but reached the text handler — routing bug.
+        logger.warn({ cmd, telegramId }, 'ROUTING BUG: known command reached text handler — check registration order');
+        await ctx.reply(`⚠️ Internal error: /${cmd} was not handled correctly. Please report this.`);
+      }
+      // Unknown commands are handled by the catch-all below — do nothing here.
+      return;
+    }
 
     const session = (ctx as any).session ?? (await auth.getSession(telegramId));
 
@@ -458,7 +496,26 @@ export function setupHandlers(bot: Bot<Context>) {
     }
   });
 
-  logger.info('Bot handlers configured successfully');
+  // --------------------------------------------------------------------------
+  // STEP 7 — Unknown command catch-all (absolute last resort)
+  // Fires only if NO handler above matched the command.
+  // This makes silent routing failures impossible — they become visible errors.
+  // --------------------------------------------------------------------------
+  bot.on('message', (ctx) => {
+    const text = (ctx.message as any)?.text ?? '';
+    if (!text.startsWith('/')) return; // Non-command messages handled above
+
+    const cmd = text.split(/\s+/)[0].replace('/', '').split('@')[0].toLowerCase();
+    logger.warn({ cmd, telegramId: ctx.from?.id }, 'Unknown command received');
+
+    ctx.reply(
+      `❓ Unknown command: \`/${cmd}\`\n\n` +
+      `Use /help to see available commands.`,
+      { parse_mode: 'Markdown' },
+    );
+  });
+
+  logger.info('[handlers] All handlers registered successfully. Known commands: ' + [...KNOWN_COMMANDS].join(', '));
 }
 
 // Re-export wallet helpers

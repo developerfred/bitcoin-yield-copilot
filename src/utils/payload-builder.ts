@@ -6,7 +6,9 @@
 //     node:crypto (createHash), which is byte-for-byte identical to
 //     @noble/hashes/sha256 and has no version conflicts.
 
-import { serializeCV, principalCV, stringAsciiCV } from '@stacks/transactions';
+
+import { stringAsciiCV, serializeCV } from '@stacks/transactions'; // serializeCV só para actionHash
+import { c32addressDecode } from 'c32check';
 import { createHash } from 'node:crypto';
 
 // ============================================================================
@@ -56,10 +58,35 @@ function cat(...arrays: Uint8Array[]): Uint8Array {
 }
 
 /** SHA-256 of the consensus-buff serialization of a Clarity principal */
-function pHash(address: string): Uint8Array {
-  return sha256(serializeCV(principalCV(address)));
+function clarityPrincipalBytes(address: string): Uint8Array {
+  const [accountPart, contractName] = address.includes('.')
+    ? address.split('.')
+    : [address, null];
+
+  const [version, hash160Hex] = c32addressDecode(accountPart);
+  const hash160 = Buffer.from(hash160Hex, 'hex');
+
+  if (contractName) {
+    const nameBytes = Buffer.from(contractName, 'utf8');
+    const buf = Buffer.alloc(1 + 1 + 20 + 1 + nameBytes.length);
+    buf[0] = 0x06;
+    buf[1] = version;
+    hash160.copy(buf, 2);
+    buf[22] = nameBytes.length;
+    nameBytes.copy(buf, 23);
+    return buf;
+  } else {
+    const buf = Buffer.alloc(1 + 1 + 20);
+    buf[0] = 0x05; // ← diferença crítica vs serializeCV que usa 0x06
+    buf[1] = version;
+    hash160.copy(buf, 2);
+    return buf;
+  }
 }
 
+function pHash(address: string): Uint8Array {
+  return sha256(clarityPrincipalBytes(address));
+}
 /** SHA-256 of the consensus-buff serialization of a Clarity string-ascii */
 function actionHash(action: string): Uint8Array {
   return sha256(serializeCV(stringAsciiCV(action)));
@@ -92,27 +119,48 @@ export function opPayload(
   ));
 }
 
+// payload-builder.ts - Updated withdrawPayload to match contract exactly
+
 /**
- * Withdraw payload — withdraw-stx / authorize-withdrawal
- * Domain u10: tgHash · domain · sha256(wallet) · nonce · amount · expiry · sha256(recipient)
+ * Withdraw payload for withdraw-helper
+ * Must match the contract's withdraw-payload function exactly:
+ * 
+ * (define-private (withdraw-payload (tg-hash (buff 32)) (wallet-hash (buff 32)) (nonce uint) (amount uint) (expiry uint) (recip-hash (buff 32)))
+ *   (concat
+ *     (concat
+ *       (concat
+ *         (concat
+ *           (concat
+ *             (concat tg-hash (uint-to-16bytes DOMAIN-WITHDRAW))
+ *             wallet-hash)
+ *           (uint-to-16bytes nonce))
+ *         (uint-to-16bytes amount))
+ *       (uint-to-16bytes expiry))
+ *     recip-hash)
+ * )
+ * 
+ * Note: This is NOT hashed. The contract then does:
+ * (let ((payload-hash (sha256 (withdraw-payload ...))))
+ *   ...)
  */
 export function withdrawPayload(
   tgHash: Uint8Array,
-  walletAddress: string,
+  walletHash: Uint8Array,
   nonce: bigint,
   amount: bigint,
   expiry: bigint,
-  recipient: string,
+  recipHash: Uint8Array,
 ): Uint8Array {
-  return sha256(cat(
+  // Return the raw payload (NOT hashed) - the contract does the hashing
+  return cat(
     tgHash,
     u128(DOMAINS.WITHDRAW),
-    pHash(walletAddress),
+    walletHash,
     u128(nonce),
     u128(amount),
     u128(expiry),
-    pHash(recipient),
-  ));
+    recipHash,
+  );
 }
 
 /**
