@@ -76,6 +76,7 @@
     "husky": "^9.1.7",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
     "vitest": "^2.1.9",
     "vitest-environment-clarinet": "^3.0.2"
   },
@@ -84,14 +85,10 @@
   },
   "overrides": {
     "strip-ansi": "^7.0.1",
-    "@hono/node-server": ">=1.19.10",
-    "express-rate-limit": ">=8.2.2",
-    "flatted": ">=3.4.0",
-    "hono": ">=4.12.7",
-    "esbuild": ">=0.24.3",
-    "elliptic": "^6.6.1",
-    "@stacks/connect": {
-      "elliptic": "^6.6.1"
-    }
+    "@hono/node-server": "^1.19.11",
+    "express-rate-limit": "^8.3.1",
+    "flatted": "^3.4.1",
+    "hono": "^4.12.8",
+    "elliptic": "^6.6.1"
   }
 }
