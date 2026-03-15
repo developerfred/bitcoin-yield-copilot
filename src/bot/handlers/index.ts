@@ -38,6 +38,9 @@ import { registerAlexHandlers } from './alex.js';
 import { registerWithdrawHandler } from './withdraw.js';
 import { registerDepositHandlers } from './deposit.js';
 import { registerProtocolHandlers } from './protocols.js';
+import { registerUSDCxHandlers } from './usdcx.js';
+import { registersBTCHandlers } from './sbtc.js';
+import { registerMarketplaceHandlers } from './marketplace.js';
 import { syncOnboardingToAuth } from '../../utils/syncOnboardingState.js';
 
 import pino from 'pino';
@@ -53,6 +56,9 @@ const STX_DECIMALS = 1_000_000;
 const KNOWN_COMMANDS = new Set([
   'start', 'help', 'wallet', 'txs', 'setwallet', 'removewallet', 'txstatus',
   'withdraw', 'deposit', 'alex', 'yields', 'portfolio', 'alerts', 'protocols',
+  'sbtc', 'sbtc-pools', 'sbtc-deposit', 'sbtc-withdraw',
+  'usdcx', 'usdcx-pools', 'usdcx-deposit', 'usdcx-withdraw',
+  'marketplace', 'hire', 'my-molbot', 'register-molbot', 'subscription',
 ]);
 
 const agentTools: Tool[] = [
@@ -151,6 +157,9 @@ export function setupHandlers(bot: Bot<Context>) {
       `/withdraw <amount> — Withdraw STX to your saved address\n` +
       `/setwallet <address> — Set withdrawal address\n` +
       `/alex — Access ALEX DEX (swap, pools, balances)\n` +
+      `/sbtc — sBTC yield opportunities\n` +
+      `/usdcx — USDCx yield opportunities\n` +
+      `/marketplace — Molbot marketplace\n` +
       `/alerts — Manage APY alerts\n` +
       `/txstatus <txid> — Check transaction status\n` +
       `/help — This message\n\n` +
@@ -183,6 +192,15 @@ export function setupHandlers(bot: Bot<Context>) {
 
   logger.info('[handlers] Registering protocol handlers (/protocols)...');
   //registerProtocolHandlers(bot);
+
+  logger.info('[handlers] Registering sBTC handlers (/sbtc /sbtc-pools /sbtc-deposit /sbtc-withdraw)...');
+  registersBTCHandlers(bot);
+
+  logger.info('[handlers] Registering USDCx handlers (/usdcx /usdcx-pools /usdcx-deposit /usdcx-withdraw)...');
+  registerUSDCxHandlers(bot);
+
+  logger.info('[handlers] Registering marketplace handlers (/marketplace /hire /my-molbot /register-molbot /subscription)...');
+  registerMarketplaceHandlers(bot);
 
   // --------------------------------------------------------------------------
   // STEP 4 — Protected inline commands
