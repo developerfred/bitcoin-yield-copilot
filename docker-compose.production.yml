@@ -1,0 +1,79 @@
+version: '3.8'
+
+# Usage:
+#   Production: docker-compose -f docker-compose.production.yml up -d
+#   With secrets: Create .env.production file with all required secrets
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    container_name: bitcoin-yield-bot
+    env_file:
+      - .env.production
+    environment:
+      - NODE_ENV=production
+      - STACKS_NETWORK=${STACKS_NETWORK:-testnet}
+    volumes:
+      - bot-data:/app/data
+      - bot-logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - bitcoin-yield
+    depends_on:
+      - mcp-server
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Production secrets - uncomment and configure for Docker Swarm
+    # secrets:
+    #   - bot_secrets
+    # environment:
+    #   - ANTHROPIC_API_KEY=/run/secrets/bot_secretsanthropic_api_key
+    #   - TELEGRAM_BOT_TOKEN=/run/secrets/bot_secrets_telegram_token
+    #   - STACKS_PRIVATE_KEY=/run/secrets/bot_secrets_stacks_key
+
+  mcp-server:
+    build:
+      context: ./docker/mcp-server
+      dockerfile: Dockerfile
+    container_name: aibtc-mcp-server
+    env_file:
+      - .env.production
+    environment:
+      - NETWORK=${STACKS_NETWORK:-testnet}
+    volumes:
+      - mcp-data:/home/nodejs/.aibtc
+    restart: unless-stopped
+    networks:
+      - bitcoin-yield
+
+volumes:
+  bot-data:
+    driver: local
+  bot-logs:
+    driver: local
+  mcp-data:
+    driver: local
+
+networks:
+  bitcoin-yield:
+    driver: bridge
+
+# Docker Secrets (for Swarm mode)
+# To use: docker secret create bot_secrets_secrets.txt
+# secrets:
+#   bot_secrets:
+#     file: ./secrets/bot_secrets.txt
+#   bot_secrets_telegram_token:
+#     file: ./secrets/telegram_token.txt
+#   bot_secrets_stacks_key:
+#     file: ./secrets/stacks_private_key.txt

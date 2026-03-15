@@ -2,15 +2,12 @@
 ;; Allows user-wallet to interact with USDCx pools for yield generation
 ;; Implements the adapter-trait for integration with user-wallet
 
-(impl-trait .adapter-trait.adapter-trait)
+(impl-trait .adapter-trait-v3.adapter-trait-v3)
 
 (define-constant ERR-INSUFFICIENT-BALANCE (err u401))
-(define-constant ERR-INVALID-ACTION (err u400))
-(define-constant ERR-NOT-AUTHORIZED (err u401))
 
 (define-data-var total-allocated uint u0)
 (define-data-var pending-rewards uint u0)
-(define-data-var contract-owner principal tx-sender)
 
 (define-map user-balances
   principal

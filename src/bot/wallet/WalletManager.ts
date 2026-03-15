@@ -2157,10 +2157,10 @@ async createContractWallet(
     const msgHashHex = msgHash.toString('hex');
     
     const signatureFormats = [
-      { name: 'raw-0', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 0; return s; } },
-      { name: 'raw-1', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 1; return s; } },
-      { name: 'raw-2', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 2; return s; } },
-      { name: 'raw-3', transform: (sig: Buffer) => { const s = Buffer.from(sig); s[0] = 3; return s; } },
+      { name: 'raw-0', transform: (sig: Buffer) => { const s = Buffer.alloc(65); s[0] = 0; sig.copy(s, 1); return s; } },
+      { name: 'raw-1', transform: (sig: Buffer) => { const s = Buffer.alloc(65); s[0] = 1; sig.copy(s, 1); return s; } },
+      { name: 'raw-27', transform: (sig: Buffer) => { const s = Buffer.alloc(65); s[0] = 27; sig.copy(s, 1); return s; } },
+      { name: 'raw-28', transform: (sig: Buffer) => { const s = Buffer.alloc(65); s[0] = 28; sig.copy(s, 1); return s; } },
       { name: 'sdk', transform: (sig: Buffer) => sig },
     ];
     
@@ -2179,6 +2179,12 @@ async createContractWallet(
       } else {
         const { signature, recovery } = stacksCrypto.ecdsaSign(msgHash, this.botPrivateKey);
         fullSig = fmt.transform(signature);
+      }
+      
+      // Validate signature is exactly 65 bytes
+      if (fullSig.length !== 65) {
+        console.error(`[withdrawStx] INVALID signature length for ${fmt.name}: ${fullSig.length} bytes (expected 65)`);
+        continue;
       }
       
       console.log(`[withdrawStx] Trying ${fmt.name}: recovery=${fullSig[0]}, sig=${fullSig.toString('hex').slice(0,20)}...`);

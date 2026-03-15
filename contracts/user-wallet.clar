@@ -30,7 +30,6 @@
 (define-constant ERR-PROTOCOL-EXISTS     (err u412))
 (define-constant ERR-ALLOCATION-EXCEEDED (err u413))
 (define-constant ERR-INSUFFICIENT-BALANCE (err u415))
-(define-constant ERR-EMERGENCY           (err u420))
 
 (define-constant BLOCKS-PER-DAY     u144)
 (define-constant MAX-HISTORY        u100)
