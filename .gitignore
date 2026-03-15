@@ -39,6 +39,10 @@ coverage/
 *.tgz
 .cache/
 
+# Temporary files
+*.tmp
+temp-*
+
 # Deployments
 
 .env
