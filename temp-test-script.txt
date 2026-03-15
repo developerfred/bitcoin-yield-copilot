@@ -1,4 +1,0 @@
-
-      .load tests/deps.ts
-      .exit
-    
