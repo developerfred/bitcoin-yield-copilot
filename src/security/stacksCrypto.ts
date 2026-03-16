@@ -178,8 +178,8 @@ export class StacksCrypto {
     return makeRandomPrivKey();
   }
 
-  getAddressFromPrivateKey(privateKey: Buffer): string {
-    return getAddressFromPrivateKey(privateKey.toString('hex') + '01');
+  getAddressFromPrivateKey(privateKey: { data: Buffer }): string {
+    return getAddressFromPrivateKey(privateKey.data.toString('hex'));
   }
 
   validatePrivateKey(key: string): boolean {
@@ -268,12 +268,38 @@ export class StacksCrypto {
       return this.verifySignature(msgHash, signature, recovery, publicKey);
     }
     
-    // Otherwise, recover public key from the signature
+    // Need to recover public key - try using noble secp256k1
+    // Build a full 65-byte signature with recovery byte
+    const fullSig = Buffer.alloc(65);
+    fullSig[0] = recovery;
+    signature.copy(fullSig, 1);
+    
     try {
-      const sig = secp256k1.Signature.fromCompact(signature);
-      const recoveredPubKey = sig.recoverPublicKey(msgHash);
-      const recoveredBytes = Buffer.from(recoveredPubKey.toRawBytes(true));
+      const recovered = secp256k1.recoverPublicKey(msgHash, fullSig, recovery);
+      const recoveredBytes = Buffer.from(recovered);
       return this.verifySignature(msgHash, signature, recovery, recoveredBytes);
+    } catch (e) {
+      throw new Error(`Failed to recover public key: ${e}`);
+    }
+  }
+
+  signRecoverable(message: Buffer, privateKey: { data: Buffer }): { signature: Buffer; recovery: number } {
+    // Same as signCompact for now
+    return this.signCompact(message, privateKey);
+  }
+
+  recoverPublicKey(message: Buffer, signature: Buffer, recovery: number): Buffer {
+    let msgHash = message;
+    if (message.length !== 32) {
+      msgHash = Buffer.from(createHash('sha256').update(message).digest());
+    }
+    
+    // Recover public key using noble secp256k1
+    try {
+      // Create signature object with recovery
+      const sig = new secp256k1.Signature(signature.slice(0, 32), signature.slice(32, 64));
+      const recovered = sig.recoverPublicKey(msgHash);
+      return Buffer.from(recovered.toRawBytes(true));
     } catch (e) {
       throw new Error(`Failed to recover public key: ${e}`);
     }
