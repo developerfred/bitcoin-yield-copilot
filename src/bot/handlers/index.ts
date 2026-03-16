@@ -41,6 +41,7 @@ import { registerProtocolHandlers } from './protocols.js';
 import { registerUSDCxHandlers } from './usdcx.js';
 import { registersBTCHandlers } from './sbtc.js';
 import { registerMarketplaceHandlers } from './marketplace.js';
+import { registerIdentityHandlers } from './identity.js';
 import { syncOnboardingToAuth } from '../../utils/syncOnboardingState.js';
 
 import pino from 'pino';
@@ -59,6 +60,7 @@ const KNOWN_COMMANDS = new Set([
   'sbtc', 'sbtc-pools', 'sbtc-deposit', 'sbtc-withdraw',
   'usdcx', 'usdcx-pools', 'usdcx-deposit', 'usdcx-withdraw',
   'marketplace', 'hire', 'my-molbot', 'register-molbot', 'subscription',
+  'identity', 'register-identity', 'my-identity', 'verify-identity',
 ]);
 
 const agentTools: Tool[] = [
@@ -160,6 +162,7 @@ export function setupHandlers(bot: Bot<Context>) {
       `/sbtc — sBTC yield opportunities\n` +
       `/usdcx — USDCx yield opportunities\n` +
       `/marketplace — Molbot marketplace\n` +
+      `/identity — ERC-8004 Identity management\n` +
       `/alerts — Manage APY alerts\n` +
       `/txstatus <txid> — Check transaction status\n` +
       `/help — This message\n\n` +
@@ -201,6 +204,9 @@ export function setupHandlers(bot: Bot<Context>) {
 
   logger.info('[handlers] Registering marketplace handlers (/marketplace /hire /my-molbot /register-molbot /subscription)...');
   registerMarketplaceHandlers(bot);
+
+  logger.info('[handlers] Registering identity handlers (/identity /register-identity /my-identity /verify-identity)...');
+  registerIdentityHandlers(bot);
 
   // --------------------------------------------------------------------------
   // STEP 4 — Protected inline commands
