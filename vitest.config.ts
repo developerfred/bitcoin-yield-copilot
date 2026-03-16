@@ -14,6 +14,7 @@ export default defineConfig({
       'coverage',
       'tests/*_test.ts', // Exclude clarinet tests - use vitest:clarinet
     ],
+    setupFiles: ['./tests/setup.ts'],
   },
   resolve: {
     alias: {
