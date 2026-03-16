@@ -204,6 +204,80 @@ export class StacksCrypto {
     for (const m of messages) h.update(m);
     return new Uint8Array(h.digest());
   }
+
+  // ── Instance methods matching test expectations ─────────────────────────────
+
+  makeRandomPrivKey(): { data: Buffer } {
+    const privKeyHex = makeRandomPrivKey();
+    // Remove the 01 suffix if present (compression marker)
+    const cleanHex = privKeyHex.endsWith('01') ? privKeyHex.slice(0, -2) : privKeyHex;
+    return { data: Buffer.from(cleanHex, 'hex') };
+  }
+
+  privateKeyToPublic(privateKey: { data: Buffer }): { data: Buffer } {
+    const pubKeyBytes = secp256k1.getPublicKey(privateKey.data, true);
+    return { data: Buffer.from(pubKeyBytes) };
+  }
+
+  sha256(data: Uint8Array | string): Uint8Array {
+    const input = typeof data === 'string' ? Buffer.from(data) : data;
+    return new Uint8Array(createHash('sha256').update(input).digest());
+  }
+
+  hmacSha256(key: Uint8Array | Buffer, ...messages: Uint8Array[]): Uint8Array {
+    const keyInput = key instanceof Buffer ? key : Buffer.from(key);
+    const h = createHmac('sha256', keyInput);
+    for (const m of messages) {
+      const msgInput = m instanceof Uint8Array ? Buffer.from(m) : m;
+      h.update(msgInput);
+    }
+    return new Uint8Array(h.digest());
+  }
+
+  deriveKey(password: string, salt: string): Buffer {
+    return scryptSync(password, salt, 32);
+  }
+
+  signCompact(message: Buffer, privateKey: { data: Buffer }): { signature: Buffer; recovery: number } {
+    // Hash the message first if it's not already 32 bytes
+    let msgHash = message;
+    if (message.length !== 32) {
+      msgHash = Buffer.from(createHash('sha256').update(message).digest());
+    }
+    
+    // Sign using ecdsaSign
+    const result = this.ecdsaSign(msgHash, privateKey.data);
+    return {
+      signature: result.signature,
+      recovery: result.recovery
+    };
+  }
+
+  verifyCompact(message: Buffer, signature: Buffer, recovery: number, publicKey?: Buffer): boolean {
+    if (recovery < 0 || recovery > 1) {
+      throw new Error('Invalid recovery parameter: must be 0 or 1');
+    }
+    
+    let msgHash = message;
+    if (message.length !== 32) {
+      msgHash = Buffer.from(createHash('sha256').update(message).digest());
+    }
+    
+    // If publicKey is provided, use it directly
+    if (publicKey) {
+      return this.verifySignature(msgHash, signature, recovery, publicKey);
+    }
+    
+    // Otherwise, recover public key from the signature
+    try {
+      const sig = secp256k1.Signature.fromCompact(signature);
+      const recoveredPubKey = sig.recoverPublicKey(msgHash);
+      const recoveredBytes = Buffer.from(recoveredPubKey.toRawBytes(true));
+      return this.verifySignature(msgHash, signature, recovery, recoveredBytes);
+    } catch (e) {
+      throw new Error(`Failed to recover public key: ${e}`);
+    }
+  }
 }
 
 export const stacksCrypto = new StacksCrypto();
