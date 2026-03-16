@@ -31,7 +31,7 @@
   "license": "MIT",
   "dependencies": {
     "@aibtc/mcp-server": "^1.35.0",
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.78.0",
     "@hono/node-server": "^1.19.11",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@noble/curves": "^2.0.1",
